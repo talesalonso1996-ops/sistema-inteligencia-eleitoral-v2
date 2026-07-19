@@ -416,14 +416,22 @@ def total_votos_validos_por_territorio(
     A chave do crosswalk inclui NR_SECAO quando `pontos_com_territorio` tem
     essa coluna (nivel por secao/urna) - sem isso, o merge com `votos_disputa`
     (que tambem tem uma linha por secao) faria fan-out: uma secao do
-    predio apareceria somada a todas as outras secoes do MESMO predio."""
+    predio apareceria somada a todas as outras secoes do MESMO predio.
+
+    So seleciona chave+QT_VOTOS do lado de `votos_disputa` antes do merge:
+    `votos_disputa` (votacao_secao) ja tem sua PROPRIA coluna CD_MUNICIPIO -
+    ao usar `nivel='CD_MUNICIPIO'` (V2, cargos estaduais), um merge sem essa
+    selecao geraria CD_MUNICIPIO_x/CD_MUNICIPIO_y (colisao de nome) em vez
+    de uma unica coluna CD_MUNICIPIO, quebrando o groupby abaixo - caso que
+    nunca ocorria com os niveis municipais (NR_ZONA/secao_id/local_votacao_id
+    nao existem em votos_disputa bruto)."""
     from .vote_filtering import votos_validos
 
     chave = ["NR_ZONA", "NR_LOCAL_VOTACAO"]
     if "NR_SECAO" in pontos_com_territorio.columns:
         chave = chave + ["NR_SECAO"]
     crosswalk = pontos_com_territorio[chave + [nivel]].drop_duplicates()
-    validos = votos_validos(votos_disputa)
+    validos = votos_validos(votos_disputa)[chave + ["QT_VOTOS"]]
     com_territorio = validos.merge(crosswalk, on=chave, how="inner")
     return (
         com_territorio.groupby(nivel, as_index=False)["QT_VOTOS"]
@@ -456,3 +464,165 @@ def agregar_votos_por_bairro(pontos_com_bairro: pd.DataFrame, coluna_bairro: str
         100 * agregado["votos_candidato"] / total
     ).round(2) if total else 0.0
     return agregado.sort_values("votos_candidato", ascending=False).reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# V2 - variantes ESTADUAIS (UF inteira, cargos como Governador) das funcoes
+# acima. Nada acima desta linha foi alterado - a malha por UF ja era baixada
+# inteira (garantir_malha_uf), so `carregar_malha`/`atribuir_setor_e_bairro`
+# filtravam para 1 municipio depois de carregar; aqui reaproveitamos o MESMO
+# arquivo ja baixado, sem filtrar, entao nao ha nenhum download adicional -
+# so o join espacial passa a cobrir todos os municipios da UF de uma vez
+# (computado sob demanda, quando o usuario abre a aba, nunca pre-calculado).
+# ---------------------------------------------------------------------------
+
+
+def normalizar_nome_municipio(texto: str) -> str:
+    """Wrapper publico de `_normalizar_nome` - usado por quem precisa casar
+    nomes de municipio entre TSE (NM_MUNICIPIO) e IBGE (NM_MUN), como o
+    mapa coropletico estadual em app.py."""
+    return _normalizar_nome(texto)
+
+
+def carregar_coordenadas_uf(uf: str) -> pd.DataFrame:
+    """Como carregar_coordenadas_locais, mas para TODOS os municipios da UF
+    de uma vez (cargos estaduais/distritais) - mesmo arquivo nacional
+    (eleitorado_local_votacao), filtrado por SG_UF em vez de
+    CD_MUNICIPIO. Inclui CD_MUNICIPIO/NM_MUNICIPIO no resultado (para
+    agregacao por municipio depois)."""
+    key = cache_key("coordenadas_uf_v1", uf.upper())
+    cached = read_cache("geographic_analysis", key)
+    if cached is not None:
+        return cached
+
+    fonte = data_sources()["tse"]["eleitorado_local_votacao"]
+    con = duckdb.connect()
+    con.execute("PRAGMA memory_limit='2GB'")
+    caminho = _caminho(fonte["arquivo_local"])
+    origem = (
+        f"read_parquet('{caminho}')"
+        if caminho.lower().endswith(".parquet")
+        else f"read_csv('{caminho}', delim='{fonte['separador']}', header=true, quote='\"', "
+             f"encoding='{fonte['encoding']}', ignore_errors=true)"
+    )
+    sql = f"""
+        SELECT
+            CD_MUNICIPIO, ANY_VALUE(NM_MUNICIPIO) AS NM_MUNICIPIO,
+            NR_ZONA, NR_LOCAL_VOTACAO,
+            ANY_VALUE(NM_LOCAL_VOTACAO) AS NM_LOCAL_VOTACAO,
+            ANY_VALUE(NM_BAIRRO) AS NM_BAIRRO,
+            ANY_VALUE(NR_CEP) AS cep,
+            ANY_VALUE(TRY_CAST(NR_LATITUDE AS DOUBLE)) AS latitude,
+            ANY_VALUE(TRY_CAST(NR_LONGITUDE AS DOUBLE)) AS longitude
+        FROM {origem}
+        WHERE SG_UF = '{uf.upper()}'
+        GROUP BY CD_MUNICIPIO, NR_ZONA, NR_LOCAL_VOTACAO
+    """
+    df = con.execute(sql).fetchdf()
+    df = df.dropna(subset=["latitude", "longitude"])
+    df = df[df["latitude"].between(-34, 6) & df["longitude"].between(-74, -28)]
+    write_cache("geographic_analysis", key, df)
+    return df
+
+
+def carregar_malha_uf_inteira(tipo: str, uf: str) -> gpd.GeoDataFrame | None:
+    """Como carregar_malha, mas retorna a malha (setores ou bairros,
+    CD2022) da UF INTEIRA, sem filtrar para 1 municipio - reaproveita o
+    MESMO arquivo ja baixado por garantir_malha_uf (a malha por UF sempre
+    foi o arquivo inteiro; carregar_malha e que filtra depois de
+    carregar). Nenhum download adicional."""
+    garantir_malha_uf(uf)
+    path = caminho_malha(tipo, uf)
+    if not path.exists():
+        logger.warning("Malha '%s' da UF '%s' nao encontrada em %s", tipo, uf, path)
+        return None
+    return gpd.read_parquet(str(path))
+
+
+def atribuir_setor_e_bairro_uf(pontos: pd.DataFrame, uf: str) -> tuple[pd.DataFrame, list[str]]:
+    """Como atribuir_setor_e_bairro, mas para TODOS os municipios da UF de
+    uma vez (cargos estaduais/distritais) - join espacial contra a malha
+    inteira da UF (indexada espacialmente pelo geopandas/STRtree, o custo
+    escala com log do numero de poligonos, nao linearmente - nao e
+    proibitivo mesmo para UFs grandes)."""
+    avisos: list[str] = []
+    if not uf_tem_malha_completa(uf):
+        avisos.append(
+            f"Malha geografica (setor censitario/bairro) nao configurada para a UF "
+            f"'{uf}'. Analises espaciais nao serao geradas."
+        )
+        return pontos, avisos
+
+    sem_coordenada = pontos[pontos["latitude"].isna() | pontos["longitude"].isna()]
+    validos = pontos.dropna(subset=["latitude", "longitude"])
+    if validos.empty:
+        avisos.append("Nenhum local de votacao com coordenadas validas para join espacial.")
+        return pontos, avisos
+
+    gdf_pontos = gpd.GeoDataFrame(
+        validos,
+        geometry=gpd.points_from_xy(validos["longitude"], validos["latitude"]),
+        crs="EPSG:4674",
+    )
+
+    setores = carregar_malha_uf_inteira("setores", uf)
+    if setores is not None:
+        gdf_pontos = _sjoin_within_com_fallback_proximo(
+            gdf_pontos, setores, ["CD_SETOR", "CD_BAIRRO", "NM_DIST", "NM_MUN"]
+        )
+    else:
+        avisos.append(f"Malha de setores censitarios sem poligonos para a UF '{uf}'.")
+        gdf_pontos["CD_SETOR"] = None
+        gdf_pontos["NM_DIST"] = None
+
+    bairros = carregar_malha_uf_inteira("bairros", uf)
+    if bairros is not None:
+        bairros_renomeado = bairros.rename(columns={"NM_BAIRRO": "NM_BAIRRO_IBGE"})
+        gdf_pontos = _sjoin_within_com_fallback_proximo(gdf_pontos, bairros_renomeado, ["NM_BAIRRO_IBGE"])
+    else:
+        gdf_pontos["NM_BAIRRO_IBGE"] = None
+        avisos.append(f"Malha de bairros sem poligonos oficiais para a UF '{uf}' - usando distrito/setor.")
+
+    resultado = pd.DataFrame(gdf_pontos.drop(columns="geometry"))
+    if not sem_coordenada.empty:
+        resultado = pd.concat([resultado, sem_coordenada], ignore_index=True, sort=False)
+        votos_sem_coordenada = int(sem_coordenada["votos_candidato"].sum())
+        avisos.append(
+            f"{len(sem_coordenada)} locais de votacao ({votos_sem_coordenada} votos do candidato) "
+            "sem coordenada geografica disponivel - aparecem nas analises por territorio como "
+            "'nao identificado', nunca sao descartados dos totais."
+        )
+
+    faltantes = int(resultado["CD_SETOR"].isna().sum()) if "CD_SETOR" in resultado else len(resultado)
+    faltantes_com_coordenada = faltantes - len(sem_coordenada)
+    if faltantes_com_coordenada > 0:
+        avisos.append(
+            f"{faltantes_com_coordenada} de {len(resultado)} locais de votacao tinham coordenada "
+            "mas nao caíram dentro de nenhum poligono de setor censitario (possivel erro de "
+            "coordenada ou poligono desatualizado)."
+        )
+    return resultado, avisos
+
+
+def carregar_malha_municipios_uf(uf: str) -> gpd.GeoDataFrame | None:
+    """Contorno de cada municipio da UF, obtido dissolvendo os poligonos de
+    setor censitario (CD2022) pelo proprio municipio (CD_MUN/NM_MUN, ja
+    presentes na malha) - sem download adicional (mesma malha ja usada por
+    atribuir_setor_e_bairro_uf). Usado pelo mapa coropletico por municipio
+    (cargos estaduais, V2). Cacheado em disco (o dissolve de uma UF grande
+    - ex.: SP, ~86MB de poligonos de setor - leva dezenas de segundos; o
+    resultado nao muda entre analises da mesma UF, so recalcula na
+    primeira vez). Usa gpd.to_parquet/read_parquet diretamente (nao a
+    write_cache/read_cache genericas de utils.py, que usam pandas puro e
+    perderiam o CRS/tipo geometry de um GeoDataFrame)."""
+    destino = resolve_path("data/cache/geographic_analysis") / f"{uf.upper()}_municipios_dissolvido.parquet"
+    if destino.exists():
+        return gpd.read_parquet(str(destino))
+
+    setores = carregar_malha_uf_inteira("setores", uf)
+    if setores is None:
+        return None
+    dissolvido = setores.dissolve(by="CD_MUN", as_index=False)[["CD_MUN", "NM_MUN", "geometry"]]
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    dissolvido.to_parquet(destino)
+    return dissolvido

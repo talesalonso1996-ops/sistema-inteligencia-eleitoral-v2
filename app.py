@@ -68,11 +68,15 @@ from src.excel_exporter import exportar_excel
 from src.geographic_analysis import (
     agregar_votos_por_bairro,
     atribuir_setor_e_bairro,
+    atribuir_setor_e_bairro_uf,
     carregar_coordenadas_locais,
+    carregar_coordenadas_uf,
     carregar_fronteira_municipio,
     carregar_malha,
+    carregar_malha_municipios_uf,
     juntar_votos_com_coordenadas,
     juntar_votos_com_coordenadas_secao,
+    normalizar_nome_municipio,
     total_votos_validos_por_territorio,
     uf_tem_malha_completa,
 )
@@ -324,6 +328,45 @@ def _carregar_demografia(
     return perfil_setor, base
 
 
+@st.cache_data(show_spinner=False)
+def _carregar_geografia_estadual(numero, uf, cargo, ano, turno, _candidatura: Candidatura, _vc: pd.DataFrame):
+    """Equivalente a _carregar_geografia, mas para a UF inteira (cargos
+    estaduais/distritais, V2) - mesmo arquivo nacional de coordenadas e
+    mesma malha por UF ja usados pelo caminho municipal, so sem filtrar
+    para 1 municipio (ver src/geographic_analysis.py)."""
+    coords = carregar_coordenadas_uf(uf)
+    pontos = juntar_votos_com_coordenadas(_vc, coords)
+    enriquecido, avisos = atribuir_setor_e_bairro_uf(pontos, uf)
+    return pontos, enriquecido, avisos
+
+
+@st.cache_data(show_spinner=False)
+def _carregar_demografia_estadual(
+    numero, uf, cargo, ano, turno, _enriquecido: pd.DataFrame, _vd: pd.DataFrame,
+):
+    """Equivalente a _carregar_demografia, mas agregado por MUNICIPIO (nao
+    por secao/predio) - unidade natural para uma disputa estadual: da uma
+    amostra grande o suficiente para regressao/clusterizacao (centenas de
+    municipios) sem precisar de granularidade de secao, que so faz sentido
+    dentro de 1 municipio."""
+    nivel = "CD_MUNICIPIO"
+    setores = set(_enriquecido["CD_SETOR"].dropna().unique()) if "CD_SETOR" in _enriquecido else set()
+    if not setores:
+        return pd.DataFrame(), pd.DataFrame()
+    perfil_setor = perfil_demografico_por_setor(setores)
+    perfil_territorio = perfil_demografico_do_territorio(_enriquecido, perfil_setor, nivel)
+    votos_territorio = _enriquecido.groupby(nivel, as_index=False)["votos_candidato"].sum()
+    total_validos = total_votos_validos_por_territorio(_vd, _enriquecido, nivel)
+    base = (
+        votos_territorio.merge(perfil_territorio, on=nivel, how="inner")
+        .merge(total_validos, on=nivel, how="left")
+    )
+    base["pct_votos_validos_territorio"] = (
+        100 * base["votos_candidato"] / base["votos_validos_territorio"]
+    ).round(2)
+    return perfil_setor, base
+
+
 st.sidebar.header("Selecione a disputa")
 
 _ANO_LABELS = {2024: "2024 - Eleicoes Municipais", 2022: "2022 - Eleicoes Gerais"}
@@ -487,6 +530,20 @@ def _demo(enriquecido_df: pd.DataFrame):
     )
 
 
+def _geo_uf():
+    return _carregar_geografia_estadual(
+        candidatura.numero, candidatura.uf, candidatura.cargo,
+        candidatura.ano_eleicao, candidatura.turno, candidatura, vc,
+    )
+
+
+def _demo_uf(enriquecido_df: pd.DataFrame):
+    return _carregar_demografia_estadual(
+        candidatura.numero, candidatura.uf, candidatura.cargo,
+        candidatura.ano_eleicao, candidatura.turno, enriquecido_df, vd,
+    )
+
+
 # ----------------------------------------------------------- Cabecalho fixo
 st.markdown(
     f"""
@@ -503,10 +560,9 @@ st.markdown(
 
 # --------------------------------------------------------------- Navegacao
 _opcoes_secao = ["Visao Geral", "Concorrencia", "Territorio"]
-if _eh_municipal:
-    _opcoes_secao += ["Geografia", "Demografia", "Estatistica Avancada", "Abordagem de Maslow"]
-else:
+if not _eh_municipal:
     _opcoes_secao += ["Indicadores Estaduais"]
+_opcoes_secao += ["Geografia", "Demografia", "Estatistica Avancada", "Abordagem de Maslow"]
 if _eh_proporcional:
     _opcoes_secao += ["Detalhamento Proporcional"]
 if _permite_2o_turno:
@@ -515,10 +571,10 @@ _opcoes_secao += ["Relatorio"]
 secao = st.sidebar.radio("Navegacao", _opcoes_secao)
 if not _eh_municipal:
     st.sidebar.caption(
-        "Piloto de cargo estadual: Geografia/Demografia/Estatistica Avancada/"
-        "Maslow dependem da malha de setores censitarios de UM municipio e "
-        "ficam fora deste piloto (seriam necessarios os ~645 municipios da "
-        "UF de uma vez)."
+        "Cargo estadual: Geografia/Demografia/Estatistica Avancada/Maslow "
+        "cobrem a UF inteira (todos os municipios), calculados sob demanda "
+        "ao abrir a aba - a primeira abertura por UF pode levar cerca de 1 "
+        "minuto (malha geografica), as seguintes ficam em cache."
     )
 
 # ============================================================ Visao Geral
@@ -781,6 +837,53 @@ elif secao == "Detalhamento Proporcional":
             st.dataframe(federacoes_rel, use_container_width=True, height=250)
 
 # =============================================================== Geografia
+elif secao == "Geografia" and not _eh_municipal:
+    if not uf_tem_malha_completa(candidatura.uf):
+        st.info(f"Malha geografica nao configurada para a UF '{candidatura.uf}'.")
+    else:
+        with st.spinner(
+            f"Localizando locais de votacao da UF {candidatura.uf} inteira e cruzando com "
+            "setores censitarios (IBGE) - a primeira vez pode levar cerca de 1 minuto..."
+        ):
+            _, enriquecido_uf, avisos_geo_uf = _geo_uf()
+
+        for aviso in avisos_geo_uf:
+            st.warning(aviso)
+
+        terr_mun_geo = desempenho_territorial(candidatura, vc, vd, rd, "CD_MUNICIPIO")
+        terr_mun_geo = terr_mun_geo.merge(
+            vd[["CD_MUNICIPIO", "NM_MUNICIPIO"]].drop_duplicates(), on="CD_MUNICIPIO", how="left"
+        )
+        terr_mun_geo["_nome_norm"] = terr_mun_geo["NM_MUNICIPIO"].apply(normalizar_nome_municipio)
+
+        with st.container(border=True):
+            st.subheader(f"Mapa coropletico por municipio ({candidatura.uf})")
+            _explicacao(
+                "Um poligono por municipio da UF (contorno oficial IBGE, dissolvido a partir "
+                "dos setores censitarios), colorido pela votacao do candidato - calculado sob "
+                "demanda, cacheado apos a primeira vez para esta UF."
+            )
+            with st.spinner("Montando contorno dos municipios (primeira vez por UF - cacheado depois)..."):
+                malha_municipios = carregar_malha_municipios_uf(candidatura.uf)
+            if malha_municipios is not None:
+                malha_municipios = malha_municipios.copy()
+                malha_municipios["_nome_norm"] = malha_municipios["NM_MUN"].apply(normalizar_nome_municipio)
+                mapa_choro_uf = maps.mapa_choropleth_territorio(
+                    malha_municipios, terr_mun_geo, "_nome_norm", "_nome_norm",
+                    "votos_candidato", candidatura.nome_urna, zoom_start=6,
+                )
+                st_folium(mapa_choro_uf, width=None, height=550, key="mapa_choro_uf")
+            else:
+                st.info("Malha de setores censitarios indisponivel para esta UF - mapa coropletico nao gerado.")
+
+        with st.container(border=True):
+            st.subheader("Ranking de municipios por votos")
+            st.dataframe(
+                terr_mun_geo[["NM_MUNICIPIO", "votos_candidato", "pct_votos_validos_territorio", "colocacao"]]
+                .sort_values("votos_candidato", ascending=False),
+                use_container_width=True, height=400,
+            )
+
 elif secao == "Geografia":
     if not uf_tem_malha_completa(candidatura.uf):
         st.info(f"Malha geografica nao configurada para a UF '{candidatura.uf}'.")
@@ -846,19 +949,32 @@ elif secao == "Demografia":
     if not uf_tem_malha_completa(candidatura.uf):
         st.info(f"Malha geografica nao configurada para a UF '{candidatura.uf}'.")
     else:
-        with st.spinner("Cruzando com o Censo 2022 (IBGE)..."):
-            _, enriquecido_secao, _ = _geo_secao()
-            perfil_setor, base_territorio = _demo(enriquecido_secao)
-
-        if base_territorio.empty:
-            st.info("Nao foi possivel montar o perfil demografico por territorio.")
-        else:
-            _explicacao(
+        if _eh_municipal:
+            with st.spinner("Cruzando com o Censo 2022 (IBGE)..."):
+                _, enriquecido_demo, _ = _geo_secao()
+                perfil_setor, base_territorio = _demo(enriquecido_demo)
+            _explicacao_demografia = (
                 "Perfil demografico por secao eleitoral, a partir do setor censitario onde o "
                 "local de votacao correspondente fica fisicamente localizado (fonte: Censo "
                 "Demografico 2022, IBGE). Secoes do mesmo local de votacao compartilham o "
                 "mesmo perfil (mesma coordenada) - variam apenas nos votos do candidato."
             )
+        else:
+            with st.spinner(f"Cruzando a UF {candidatura.uf} inteira com o Censo 2022 (IBGE)..."):
+                _, enriquecido_demo, avisos_demo_uf = _geo_uf()
+                for aviso in avisos_demo_uf:
+                    st.warning(aviso)
+                perfil_setor, base_territorio = _demo_uf(enriquecido_demo)
+            _explicacao_demografia = (
+                f"Perfil demografico por MUNICIPIO (media ponderada pelos votos do candidato "
+                f"dentro de cada municipio) - UF {candidatura.uf} inteira, a partir do setor "
+                "censitario de cada local de votacao (fonte: Censo Demografico 2022, IBGE)."
+            )
+
+        if base_territorio.empty:
+            st.info("Nao foi possivel montar o perfil demografico por territorio.")
+        else:
+            _explicacao(_explicacao_demografia)
             with st.container(border=True):
                 st.dataframe(
                     base_territorio, use_container_width=True, height=400,
@@ -882,13 +998,27 @@ elif secao == "Estatistica Avancada":
         st.info(f"Malha geografica nao configurada para a UF '{candidatura.uf}'.")
     else:
         with st.spinner("Calculando correlacoes, regressoes e clusterizacao..."):
-            _, enriquecido_secao, _ = _geo_secao()
-            perfil_setor, base_territorio = _demo(enriquecido_secao)
+            if _eh_municipal:
+                _, enriquecido_est, _ = _geo_secao()
+                perfil_setor, base_territorio = _demo(enriquecido_est)
+            else:
+                _, enriquecido_est, avisos_est = _geo_uf()
+                for aviso in avisos_est:
+                    st.warning(aviso)
+                perfil_setor, base_territorio = _demo_uf(enriquecido_est)
+
+        if not _eh_municipal and not base_territorio.empty:
+            _explicacao(
+                f"Unidade de observacao: MUNICIPIO (UF {candidatura.uf} inteira, "
+                f"{len(base_territorio)} municipios) - nao secao/local de votacao, que so "
+                "faz sentido dentro de 1 municipio."
+            )
 
         if base_territorio.empty:
             st.info("Dados insuficientes para analise estatistica territorial.")
         else:
             variaveis_disp = [v for v in VARIAVEIS_DEMOGRAFICAS if v in base_territorio.columns]
+            nivel_estatistica = _NIVEL_TERRITORIO_DEMOGRAFICO if _eh_municipal else "CD_MUNICIPIO"
 
             with st.container(border=True):
                 st.subheader("Correlacao com o desempenho eleitoral")
@@ -974,7 +1104,7 @@ elif secao == "Estatistica Avancada":
                         st.plotly_chart(
                             charts.grafico_clusters(
                                 resultado_clustering.territorios_com_cluster, variaveis_disp[0], variaveis_disp[1],
-                                _NIVEL_TERRITORIO_DEMOGRAFICO,
+                                nivel_estatistica,
                             ),
                             use_container_width=True,
                         )
@@ -994,11 +1124,11 @@ elif secao == "Estatistica Avancada":
                 )
                 if resultado_clustering:
                     potencial = identificar_bairros_potencial(
-                        resultado_clustering, modelo_log, _NIVEL_TERRITORIO_DEMOGRAFICO, "votos_candidato",
+                        resultado_clustering, modelo_log, nivel_estatistica, "votos_candidato",
                     )
                     if not potencial.empty:
                         st.plotly_chart(
-                            charts.grafico_bairros_potencial(potencial, _NIVEL_TERRITORIO_DEMOGRAFICO),
+                            charts.grafico_bairros_potencial(potencial, nivel_estatistica),
                             use_container_width=True,
                         )
                         st.dataframe(potencial, use_container_width=True)
@@ -1013,8 +1143,20 @@ elif secao == "Abordagem de Maslow":
         st.info(f"Malha geografica nao configurada para a UF '{candidatura.uf}'.")
     else:
         with st.spinner("Recalculando modelos estatisticos para aplicar a lente de Maslow..."):
-            _, enriquecido_secao, _ = _geo_secao()
-            perfil_setor, base_territorio = _demo(enriquecido_secao)
+            if _eh_municipal:
+                _, enriquecido_maslow, _ = _geo_secao()
+                perfil_setor, base_territorio = _demo(enriquecido_maslow)
+            else:
+                _, enriquecido_maslow, avisos_maslow = _geo_uf()
+                for aviso in avisos_maslow:
+                    st.warning(aviso)
+                perfil_setor, base_territorio = _demo_uf(enriquecido_maslow)
+
+        if not _eh_municipal and not base_territorio.empty:
+            _explicacao(
+                f"Unidade de observacao: MUNICIPIO (UF {candidatura.uf} inteira, "
+                f"{len(base_territorio)} municipios)."
+            )
 
         if base_territorio.empty:
             st.info("Dados insuficientes para aplicar a abordagem de Maslow.")

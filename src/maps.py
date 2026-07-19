@@ -51,9 +51,12 @@ def mapa_choropleth_territorio(
     coluna_chave_agregado: str,
     coluna_valor: str,
     nome_candidato: str,
+    zoom_start: int = 11,
 ) -> folium.Map:
-    """Mapa coropletico: pinta cada poligono (bairro/distrito/setor) pela
-    intensidade de votos do candidato (tom sequencial unico - azul)."""
+    """Mapa coropletico: pinta cada poligono (bairro/distrito/setor/
+    municipio) pela intensidade de votos do candidato (tom sequencial
+    unico - azul). `zoom_start` menor (ex.: 6-7) para malhas que cobrem uma
+    UF inteira (V2, cargos estaduais) em vez de 1 municipio."""
     malha_wgs84 = malha.to_crs("EPSG:4674")
     dados = malha_wgs84.merge(
         agregado, left_on=coluna_chave_malha, right_on=coluna_chave_agregado, how="left"
@@ -62,7 +65,7 @@ def mapa_choropleth_territorio(
 
     centroides = dados.to_crs("EPSG:31983").geometry.centroid.to_crs("EPSG:4674")
     centro_lat, centro_lon = centroides.y.mean(), centroides.x.mean()
-    mapa = folium.Map(location=[centro_lat, centro_lon], zoom_start=11, tiles="cartodbdark_matter")
+    mapa = folium.Map(location=[centro_lat, centro_lon], zoom_start=zoom_start, tiles="cartodbdark_matter")
 
     escala = LinearColormap(
         _AZUL_SEQUENCIAL, vmin=0, vmax=max(dados[coluna_valor].max(), 1),
