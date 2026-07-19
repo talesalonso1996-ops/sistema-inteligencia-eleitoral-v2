@@ -489,7 +489,16 @@ st.sidebar.markdown(
     f"- Candidato: {alvo.nome_urna} ({alvo.numero}) - {alvo.partido_sigla}\n"
     f"- Abrangencia: {'Municipal' if alvo.codigo_municipio_tse is not None else 'Estadual (piloto)'}"
 )
-if not st.sidebar.button("Gerar analise eleitoral", type="primary"):
+_assinatura_selecao = (
+    alvo.ano_eleicao, alvo.uf, alvo.codigo_municipio_tse, alvo.cargo, alvo.turno, alvo.numero,
+)
+_ja_gerado_para_esta_selecao = st.session_state.get("v2_selecao_gerada") == _assinatura_selecao
+
+if st.sidebar.button("Gerar analise eleitoral", type="primary"):
+    st.session_state["v2_selecao_gerada"] = _assinatura_selecao
+    _ja_gerado_para_esta_selecao = True
+
+if not _ja_gerado_para_esta_selecao:
     st.title("Sistema de Inteligencia Eleitoral")
     st.info("Confira o resumo da selecao na barra lateral e clique em **Gerar analise eleitoral**.")
     st.stop()
@@ -640,27 +649,34 @@ if secao == "Visao Geral":
     with st.container(border=True):
         st.plotly_chart(charts.grafico_pizza_votos_validos(rg), use_container_width=True)
 
-    perfil_economico = carregar_perfil_economico_municipio(candidatura)
     with st.container(border=True):
         st.subheader("Contexto economico do municipio (RAIS + CAGED)")
-        _explicacao(
-            "RAIS Estabelecimentos e CAGED tem granularidade de MUNICIPIO (nao de "
-            "distrito/zona) - por isso aparecem aqui como contexto do municipio como um "
-            "todo, nao como variavel comparada entre territorios (isso fica nas secoes "
-            "Estatistica Avancada/Territorio, que usam dados do Censo por setor)."
-        )
-        if not perfil_economico.disponivel:
-            st.info("Dados de RAIS/CAGED indisponiveis para este municipio.")
-        else:
-            ce1, ce2, ce3 = st.columns(3)
-            _kpi(ce1, "Vinculos formais ativos (RAIS 2023)", _fmt(perfil_economico.vinculos_ativos_total))
-            _kpi(ce2, "Estabelecimentos ativos (RAIS 2023)", _fmt(perfil_economico.estabelecimentos_ativos))
-            _kpi(
-                ce3, "Saldo de empregos formais (CAGED 2024)",
-                f"{perfil_economico.saldo_caged_2024:+,}".replace(",", "."),
-                tom={"crescimento": "bom", "retracao": "ruim"}.get(perfil_economico.tendencia, "neutro"),
+        if not _eh_municipal:
+            st.info(
+                "Contexto de RAIS/CAGED tem granularidade de MUNICIPIO - nao se aplica "
+                "diretamente a um cargo estadual (a UF inteira nao e 'um municipio'). "
+                "Disponivel apenas para Prefeito/Vereador nesta versao."
             )
-            st.plotly_chart(charts.grafico_perfil_economico_municipio(perfil_economico), use_container_width=True)
+        else:
+            perfil_economico = carregar_perfil_economico_municipio(candidatura)
+            _explicacao(
+                "RAIS Estabelecimentos e CAGED tem granularidade de MUNICIPIO (nao de "
+                "distrito/zona) - por isso aparecem aqui como contexto do municipio como um "
+                "todo, nao como variavel comparada entre territorios (isso fica nas secoes "
+                "Estatistica Avancada/Territorio, que usam dados do Censo por setor)."
+            )
+            if not perfil_economico.disponivel:
+                st.info("Dados de RAIS/CAGED indisponiveis para este municipio.")
+            else:
+                ce1, ce2, ce3 = st.columns(3)
+                _kpi(ce1, "Vinculos formais ativos (RAIS 2023)", _fmt(perfil_economico.vinculos_ativos_total))
+                _kpi(ce2, "Estabelecimentos ativos (RAIS 2023)", _fmt(perfil_economico.estabelecimentos_ativos))
+                _kpi(
+                    ce3, "Saldo de empregos formais (CAGED 2024)",
+                    f"{perfil_economico.saldo_caged_2024:+,}".replace(",", "."),
+                    tom={"crescimento": "bom", "retracao": "ruim"}.get(perfil_economico.tendencia, "neutro"),
+                )
+                st.plotly_chart(charts.grafico_perfil_economico_municipio(perfil_economico), use_container_width=True)
 
 # ============================================================ Concorrencia
 elif secao == "Concorrencia":
