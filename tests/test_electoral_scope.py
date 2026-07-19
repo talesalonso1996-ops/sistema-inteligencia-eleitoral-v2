@@ -96,3 +96,21 @@ def test_cargos_disponiveis_filtra_deputado_distrital_por_uf():
 def test_turno_invalido_levanta_erro():
     with pytest.raises(EscopoInvalidoError):
         resolver_escopo(2024, "PREFEITO", uf="SP", municipio="SANTOS", turno=3)
+
+
+@pytest.mark.parametrize(
+    "cargo,ano,uf,municipio,esperado",
+    [
+        ("PREFEITO", 2024, "SP", "SANTOS", "MAJORITARIO"),
+        ("VEREADOR", 2024, "SP", "SANTOS", "PROPORCIONAL"),
+        ("PRESIDENTE", 2022, None, None, "MAJORITARIO"),
+        ("GOVERNADOR", 2022, "SP", None, "MAJORITARIO"),
+        ("SENADOR", 2022, "SP", None, "MAJORITARIO"),
+        ("DEPUTADO FEDERAL", 2022, "SP", None, "PROPORCIONAL"),
+        ("DEPUTADO ESTADUAL", 2022, "SP", None, "PROPORCIONAL"),
+        ("DEPUTADO DISTRITAL", 2022, "DF", None, "PROPORCIONAL"),
+    ],
+)
+def test_sistema_eleitoral_por_cargo(cargo, ano, uf, municipio, esperado):
+    escopo = resolver_escopo(ano, cargo, uf=uf, municipio=municipio)
+    assert escopo.sistema_eleitoral == esperado

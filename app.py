@@ -36,6 +36,7 @@ from src.candidate_finder import (
     votos_da_disputa,
     votos_da_disputa_generalizado,
 )
+from src.proportional_analysis import ranking_federacoes, resumo_proporcional
 from src.rules.electoral_scope import cargos_disponiveis, resolver_escopo
 from src.state_scope_indicators import (
     calcular_concentracao_territorial,
@@ -442,6 +443,7 @@ _escopo_atual = resolver_escopo(
     turno=candidatura.turno,
 )
 _eh_municipal = _escopo_atual.tipo_abrangencia == "MUNICIPAL"
+_eh_proporcional = _escopo_atual.sistema_eleitoral == "PROPORCIONAL"
 
 rg = resultado_geral(candidatura, vd, rd)
 ranking = ranking_disputa(vd, rd)
@@ -489,6 +491,8 @@ if _eh_municipal:
     _opcoes_secao += ["Geografia", "Demografia", "Estatistica Avancada", "Abordagem de Maslow"]
 else:
     _opcoes_secao += ["Indicadores Estaduais"]
+if _eh_proporcional:
+    _opcoes_secao += ["Detalhamento Proporcional"]
 _opcoes_secao += ["Relatorio"]
 secao = st.sidebar.radio("Navegacao", _opcoes_secao)
 if not _eh_municipal:
@@ -695,6 +699,68 @@ elif secao == "Indicadores Estaduais":
             .sort_values("votos_candidato", ascending=False),
             use_container_width=True, height=400,
         )
+
+# ================================================ Detalhamento Proporcional
+elif secao == "Detalhamento Proporcional":
+    _explicacao(
+        "Cargo proporcional: a situacao final oficial (eleito/suplente/nao "
+        "eleito) vem diretamente do TSE (DS_SIT_TOT_TURNO) - este sistema NAO "
+        "recalcula quociente eleitoral/partidario nem a distribuicao de "
+        "sobras (metodo de maiores medias), so reorganiza o resultado ja "
+        "oficial por posicao dentro do partido/federacao."
+    )
+    partidos_rel = ranking_partidos(ranking, vd, rd)
+    resumo_prop = resumo_proporcional(candidatura.numero, ranking, rd, partidos_rel)
+
+    c1, c2, c3, c4 = st.columns(4)
+    _kpi(c1, "Situacao oficial (TSE)", resumo_prop.situacao_final_oficial)
+    _kpi(c2, "Colocacao geral", f"{resumo_prop.colocacao_geral}o de {len(ranking)}")
+    _kpi(c3, "Colocacao no partido", f"{resumo_prop.colocacao_dentro_partido}o de {resumo_prop.n_candidatos_partido}")
+    _kpi(c4, "Eleitos no partido", str(resumo_prop.n_eleitos_partido))
+
+    with st.container(border=True):
+        st.subheader(f"Dentro do partido ({resumo_prop.partido_sigla})")
+        c5, c6 = st.columns(2)
+        _kpi(c5, "Votos do partido (nominal + legenda)", _fmt(resumo_prop.votos_partido_total))
+        _kpi(c6, "% do candidato no partido", f"{resumo_prop.pct_participacao_partido}%")
+        c7, c8 = st.columns(2)
+        _kpi(
+            c7, "Diferenca p/ ultimo eleito do partido",
+            f"{_fmt(resumo_prop.diferenca_para_ultimo_eleito_partido)} votos"
+            if resumo_prop.diferenca_para_ultimo_eleito_partido is not None else "n/d",
+            tom="bom" if (resumo_prop.diferenca_para_ultimo_eleito_partido or 0) >= 0 else "ruim",
+        )
+        _kpi(
+            c8, "Diferenca p/ 1o suplente do partido",
+            f"{_fmt(resumo_prop.diferenca_para_primeiro_suplente_partido)} votos"
+            if resumo_prop.diferenca_para_primeiro_suplente_partido is not None else "n/d",
+        )
+
+    if resumo_prop.federacao:
+        with st.container(border=True):
+            st.subheader(f"Dentro da federacao/coligacao ({resumo_prop.federacao})")
+            c9, c10, c11 = st.columns(3)
+            _kpi(c9, "Votos da federacao", _fmt(resumo_prop.votos_federacao_total))
+            _kpi(c10, "Colocacao na federacao", f"{resumo_prop.colocacao_dentro_federacao}o de {resumo_prop.n_candidatos_federacao}")
+            _kpi(c11, "Eleitos na federacao", str(resumo_prop.n_eleitos_federacao))
+
+    with st.container(border=True):
+        st.subheader(f"Todos os candidatos do partido {resumo_prop.partido_sigla}")
+        grupo_partido_rel = ranking[ranking["partido_sigla"] == resumo_prop.partido_sigla].sort_values(
+            "total_votos", ascending=False
+        )
+        st.dataframe(
+            grupo_partido_rel[["nome_urna", "total_votos", "pct_votos_validos", "resultado_final", "eleito"]],
+            use_container_width=True, height=350,
+        )
+
+    with st.container(border=True):
+        st.subheader("Ranking de partidos/federacoes na disputa")
+        st.dataframe(partidos_rel, use_container_width=True, height=300)
+        federacoes_rel = ranking_federacoes(partidos_rel, rd)
+        if not federacoes_rel.empty:
+            st.subheader("Ranking de federacoes/coligacoes")
+            st.dataframe(federacoes_rel, use_container_width=True, height=250)
 
 # =============================================================== Geografia
 elif secao == "Geografia":

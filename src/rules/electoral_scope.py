@@ -35,6 +35,7 @@ class EscopoEleitoral:
     ano_eleicao: int
     cargo: str
     tipo_abrangencia: str  # "NACIONAL" | "ESTADUAL" | "DISTRITAL" | "MUNICIPAL"
+    sistema_eleitoral: str  # "MAJORITARIO" | "PROPORCIONAL"
     uf_obrigatoria: bool
     municipio_obrigatorio: bool
     uf_e_filtro_analitico: bool  # True so p/ Presidente: UF nunca reduz o total oficial nacional
@@ -49,6 +50,7 @@ class EscopoEleitoral:
 @dataclass(frozen=True)
 class _RegraCargo:
     tipo_abrangencia: str
+    sistema_eleitoral: str  # "MAJORITARIO" | "PROPORCIONAL"
     uf_obrigatoria: bool
     municipio_obrigatorio: bool
     uf_e_filtro_analitico: bool
@@ -67,6 +69,7 @@ _NIVEIS_DISTRITAIS = ("DF", "REGIAO_ADMINISTRATIVA", "ZONA", "LOCAL_VOTACAO", "S
 _CARGO_SCOPE_TABLE: dict[str, _RegraCargo] = {
     "PREFEITO": _RegraCargo(
         tipo_abrangencia="MUNICIPAL",
+        sistema_eleitoral="MAJORITARIO",
         uf_obrigatoria=True,
         municipio_obrigatorio=True,
         uf_e_filtro_analitico=False,
@@ -77,6 +80,7 @@ _CARGO_SCOPE_TABLE: dict[str, _RegraCargo] = {
     ),
     "VEREADOR": _RegraCargo(
         tipo_abrangencia="MUNICIPAL",
+        sistema_eleitoral="PROPORCIONAL",
         uf_obrigatoria=True,
         municipio_obrigatorio=True,
         uf_e_filtro_analitico=False,
@@ -90,6 +94,7 @@ _CARGO_SCOPE_TABLE: dict[str, _RegraCargo] = {
     ),
     "PRESIDENTE": _RegraCargo(
         tipo_abrangencia="NACIONAL",
+        sistema_eleitoral="MAJORITARIO",
         uf_obrigatoria=False,
         municipio_obrigatorio=False,
         uf_e_filtro_analitico=True,
@@ -100,6 +105,7 @@ _CARGO_SCOPE_TABLE: dict[str, _RegraCargo] = {
     ),
     "GOVERNADOR": _RegraCargo(
         tipo_abrangencia="ESTADUAL",
+        sistema_eleitoral="MAJORITARIO",
         uf_obrigatoria=True,
         municipio_obrigatorio=False,
         uf_e_filtro_analitico=False,
@@ -110,6 +116,7 @@ _CARGO_SCOPE_TABLE: dict[str, _RegraCargo] = {
     ),
     "SENADOR": _RegraCargo(
         tipo_abrangencia="ESTADUAL",
+        sistema_eleitoral="MAJORITARIO",
         uf_obrigatoria=True,
         municipio_obrigatorio=False,
         uf_e_filtro_analitico=False,
@@ -120,6 +127,7 @@ _CARGO_SCOPE_TABLE: dict[str, _RegraCargo] = {
     ),
     "DEPUTADO FEDERAL": _RegraCargo(
         tipo_abrangencia="ESTADUAL",
+        sistema_eleitoral="PROPORCIONAL",
         uf_obrigatoria=True,
         municipio_obrigatorio=False,
         uf_e_filtro_analitico=False,
@@ -130,6 +138,7 @@ _CARGO_SCOPE_TABLE: dict[str, _RegraCargo] = {
     ),
     "DEPUTADO ESTADUAL": _RegraCargo(
         tipo_abrangencia="ESTADUAL",
+        sistema_eleitoral="PROPORCIONAL",
         uf_obrigatoria=True,
         municipio_obrigatorio=False,
         uf_e_filtro_analitico=False,
@@ -140,6 +149,7 @@ _CARGO_SCOPE_TABLE: dict[str, _RegraCargo] = {
     ),
     "DEPUTADO DISTRITAL": _RegraCargo(
         tipo_abrangencia="DISTRITAL",
+        sistema_eleitoral="PROPORCIONAL",
         uf_obrigatoria=True,
         municipio_obrigatorio=False,
         uf_e_filtro_analitico=False,
@@ -229,6 +239,7 @@ def resolver_escopo(
         ano_eleicao=ano,
         cargo=cargo_norm,
         tipo_abrangencia=regra.tipo_abrangencia,
+        sistema_eleitoral=regra.sistema_eleitoral,
         uf_obrigatoria=regra.uf_obrigatoria,
         municipio_obrigatorio=regra.municipio_obrigatorio,
         uf_e_filtro_analitico=regra.uf_e_filtro_analitico,
