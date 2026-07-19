@@ -37,6 +37,7 @@ from src.candidate_finder import (
     votos_da_disputa_generalizado,
 )
 from src.proportional_analysis import ranking_federacoes, resumo_proporcional
+from src.turno_comparison import comparar_turnos
 from src.rules.electoral_scope import cargos_disponiveis, resolver_escopo
 from src.state_scope_indicators import (
     calcular_concentracao_territorial,
@@ -262,6 +263,20 @@ def _carregar_dados_candidatura_v2(ano: int, cargo: str, uf: str, municipio_codi
 
 
 @st.cache_data(show_spinner=False)
+def _carregar_territorial_turno(
+    veio_do_fallback: bool, ano: int, cargo: str, uf: str, municipio_codigo, turno_alvo: int, numero: int, nivel: str,
+) -> pd.DataFrame:
+    """Carrega o desempenho territorial de um turno especifico (1 ou 2)
+    para o MESMO candidato - usado pela Comparacao de Turnos, que precisa
+    dos dois turnos independente de qual foi escolhido na selecao guiada."""
+    if veio_do_fallback:
+        cand_t, vc_t, vd_t, rd_t = _carregar_dados_candidatura(numero, municipio_codigo, cargo, ano, turno_alvo)
+    else:
+        cand_t, vc_t, vd_t, rd_t = _carregar_dados_candidatura_v2(ano, cargo, uf, municipio_codigo, turno_alvo, numero)
+    return desempenho_territorial(cand_t, vc_t, vd_t, rd_t, nivel)
+
+
+@st.cache_data(show_spinner=False)
 def _carregar_geografia(numero, municipio_tse, cargo, ano, turno, _candidatura: Candidatura, _vc: pd.DataFrame):
     coords = carregar_coordenadas_locais(_candidatura)
     pontos = juntar_votos_com_coordenadas(_vc, coords)
@@ -444,6 +459,7 @@ _escopo_atual = resolver_escopo(
 )
 _eh_municipal = _escopo_atual.tipo_abrangencia == "MUNICIPAL"
 _eh_proporcional = _escopo_atual.sistema_eleitoral == "PROPORCIONAL"
+_permite_2o_turno = _escopo_atual.permite_segundo_turno
 
 rg = resultado_geral(candidatura, vd, rd)
 ranking = ranking_disputa(vd, rd)
@@ -493,6 +509,8 @@ else:
     _opcoes_secao += ["Indicadores Estaduais"]
 if _eh_proporcional:
     _opcoes_secao += ["Detalhamento Proporcional"]
+if _permite_2o_turno:
+    _opcoes_secao += ["Comparacao de Turnos"]
 _opcoes_secao += ["Relatorio"]
 secao = st.sidebar.radio("Navegacao", _opcoes_secao)
 if not _eh_municipal:
@@ -1066,6 +1084,71 @@ elif secao == "Abordagem de Maslow":
             with st.container(border=True):
                 st.subheader("Variaveis demograficas sem correspondencia teorica direta")
                 st.dataframe(resultado_maslow.variaveis_sem_correspondencia, use_container_width=True)
+
+# ==================================================== Comparacao de Turnos
+elif secao == "Comparacao de Turnos":
+    _explicacao(
+        "Compara o desempenho do candidato entre 1o e 2o turno: variacao "
+        "absoluta/percentual de votos, mudanca na % de votos validos, "
+        "territorios onde o candidato passou a liderar ou deixou de liderar "
+        "(nao um limiar arbitrario - mudanca real de 1o lugar no territorio), "
+        "e variacao do comparecimento quando disponivel."
+    )
+    _nivel_2t = "CD_MUNICIPIO" if not _eh_municipal else st.session_state.get("nivel_territorial", "NR_ZONA")
+
+    with st.spinner("Carregando dados do 1o e 2o turno..."):
+        _terr_t1 = _carregar_territorial_turno(
+            veio_do_fallback, candidatura.ano_eleicao, candidatura.cargo, candidatura.uf,
+            candidatura.codigo_municipio_tse, 1, candidatura.numero, _nivel_2t,
+        )
+        _terr_t2 = _carregar_territorial_turno(
+            veio_do_fallback, candidatura.ano_eleicao, candidatura.cargo, candidatura.uf,
+            candidatura.codigo_municipio_tse, 2, candidatura.numero, _nivel_2t,
+        )
+
+    comp_turnos = comparar_turnos(_terr_t1, _terr_t2, _nivel_2t)
+
+    c1, c2, c3, c4 = st.columns(4)
+    _kpi(c1, "Votos 1o turno", _fmt(comp_turnos.votos_turno1))
+    _kpi(c2, "Votos 2o turno", _fmt(comp_turnos.votos_turno2))
+    _kpi(
+        c3, "Variacao absoluta", f"{comp_turnos.variacao_absoluta:+,}".replace(",", "."),
+        tom="bom" if comp_turnos.variacao_absoluta >= 0 else "ruim",
+    )
+    _kpi(
+        c4, "Variacao percentual", f"{comp_turnos.variacao_percentual:+.2f}%",
+        tom="bom" if comp_turnos.variacao_percentual >= 0 else "ruim",
+    )
+
+    c5, c6 = st.columns(2)
+    _kpi(c5, "% votos validos - 1o turno", f"{comp_turnos.pct_validos_turno1}%")
+    _kpi(c6, "% votos validos - 2o turno", f"{comp_turnos.pct_validos_turno2}%")
+
+    with st.container(border=True):
+        st.subheader("Territorios conquistados e perdidos entre os turnos")
+        cc1, cc2 = st.columns(2)
+        with cc1:
+            st.metric("Territorios conquistados", len(comp_turnos.territorios_conquistados))
+            if comp_turnos.territorios_conquistados:
+                amostra = ", ".join(str(t) for t in comp_turnos.territorios_conquistados[:20])
+                st.caption(amostra + (" ..." if len(comp_turnos.territorios_conquistados) > 20 else ""))
+        with cc2:
+            st.metric("Territorios perdidos", len(comp_turnos.territorios_perdidos))
+            if comp_turnos.territorios_perdidos:
+                amostra = ", ".join(str(t) for t in comp_turnos.territorios_perdidos[:20])
+                st.caption(amostra + (" ..." if len(comp_turnos.territorios_perdidos) > 20 else ""))
+
+    if comp_turnos.variacao_comparecimento_pct is not None:
+        with st.container(border=True):
+            st.subheader("Comparecimento")
+            st.metric("Variacao do comparecimento", f"{comp_turnos.variacao_comparecimento_pct:+.2f}%")
+
+    with st.container(border=True):
+        st.subheader("Detalhamento por territorio")
+        st.dataframe(
+            comp_turnos.detalhe_territorial.sort_values("delta_votos", ascending=False),
+            use_container_width=True, height=400,
+        )
 
 # ================================================================ Relatorio
 elif secao == "Relatorio" and not _eh_municipal:
