@@ -4,8 +4,9 @@ variaveis demograficas do territorio (secao 10.2 do briefing).
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
+import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
@@ -17,6 +18,55 @@ logger = get_logger(__name__)
 _AMOSTRA_MINIMA_POR_VARIAVEL = 10  # observacoes por variavel preditora, regra pratica
 
 
+def _resolver_colunas_cluster(
+    df: pd.DataFrame, coluna_cluster: str | list[str] | None, nome_analise: str,
+) -> tuple[list[str], list[DataIssue]]:
+    """Normaliza `coluna_cluster` (string simples, lista de ate 2 colunas,
+    ou None) para uma lista validada de colunas realmente presentes em
+    `df`. statsmodels (`cov_type='cluster'`) suporta no maximo 2 dimensoes
+    de cluster simultaneas (`cov_cluster_2groups`) - mais de 2 colunas sao
+    truncadas com aviso explicito, nunca descartadas silenciosamente."""
+    if coluna_cluster is None:
+        return [], []
+    colunas = [coluna_cluster] if isinstance(coluna_cluster, str) else list(coluna_cluster)
+    issues: list[DataIssue] = []
+    if len(colunas) > 2:
+        issues.append(DataIssue(
+            etapa=nome_analise, severidade="aviso",
+            mensagem=(
+                f"Cluster com mais de 2 colunas informado ({', '.join(colunas)}) - "
+                "statsmodels so suporta ate 2 dimensoes de cluster; usando apenas as "
+                f"2 primeiras ({', '.join(colunas[:2])})."
+            ),
+        ))
+        colunas = colunas[:2]
+    colunas_validas = [c for c in colunas if c in df.columns]
+    faltando = [c for c in colunas if c not in df.columns]
+    if faltando:
+        issues.append(DataIssue(
+            etapa=nome_analise, severidade="aviso",
+            mensagem=f"Coluna(s) de cluster ausente(s) nesta amostra, ignorada(s): {', '.join(faltando)}.",
+        ))
+    return colunas_validas, issues
+
+
+def _grupos_cluster(dados: pd.DataFrame, colunas_cluster: list[str]):
+    """Monta o argumento `groups` para `cov_kwds` do statsmodels. Para 1
+    coluna, uma Series simples basta. Para 2 colunas (cluster de 2 vias,
+    `cov_cluster_2groups`), o statsmodels exige um ndarray 2D HOMOGENEO e
+    C-contiguo (ele faz `arr.view([('', arr.dtype)] * 2)` internamente,
+    que falha com "Cannot change data-type for array of references" se o
+    array for dtype=object - o que sempre acontece se as 2 colunas tiverem
+    dtypes diferentes, ex.: `local_votacao_id` (string) + `CD_MUNICIPIO`
+    (int), o caso real de uso desta funcao). Corrigido convertendo as 2
+    colunas para string (dtype unicode de largura fixa, homogeneo) antes de
+    montar o array."""
+    if len(colunas_cluster) == 1:
+        return dados[colunas_cluster[0]]
+    arr = dados[colunas_cluster].astype(str).to_numpy(dtype=str)
+    return np.ascontiguousarray(arr)
+
+
 @dataclass
 class ResultadoRegressao:
     r_quadrado: float
@@ -26,6 +76,7 @@ class ResultadoRegressao:
     intercepto: float
     variaveis_utilizadas: list[str]
     erro_padrao_cluster: bool = False
+    colunas_cluster_utilizadas: list[str] = field(default_factory=list)
     limitacoes: str = (
         "Regressao com dados agregados por territorio (ecological regression): "
         "as relacoes encontradas valem para o territorio, nao permitem inferir "
@@ -33,7 +84,16 @@ class ResultadoRegressao:
     )
 
     def __post_init__(self) -> None:
-        if self.erro_padrao_cluster:
+        if self.erro_padrao_cluster and len(self.colunas_cluster_utilizadas) == 2:
+            self.limitacoes += (
+                " A unidade de observacao e mais fina que o territorio agregado usual "
+                f"(cluster de 2 vias: {self.colunas_cluster_utilizadas[0]} e "
+                f"{self.colunas_cluster_utilizadas[1]}) - o erro-padrao usado e robusto "
+                "a cluster nessas duas dimensoes simultaneamente, evitando superestimar "
+                "a precisao dos coeficientes quando observacoes dentro do mesmo local de "
+                "votacao E dentro do mesmo municipio nao sao independentes."
+            )
+        elif self.erro_padrao_cluster:
             self.limitacoes += (
                 " A unidade de observacao e a secao eleitoral (varias por local de "
                 "votacao); secoes do mesmo local compartilham o mesmo perfil "
@@ -68,7 +128,8 @@ def _remover_variaveis_sem_variancia(
 
 
 def regressao_linear_votos(
-    df: pd.DataFrame, coluna_alvo: str, variaveis: list[str], coluna_cluster: str | None = None,
+    df: pd.DataFrame, coluna_alvo: str, variaveis: list[str],
+    coluna_cluster: str | list[str] | None = None,
 ) -> tuple[ResultadoRegressao | None, list[DataIssue]]:
     """Regressao OLS (minimos quadrados) do percentual de votos do
     candidato por territorio em funcao das variaveis demograficas
@@ -79,10 +140,15 @@ def regressao_linear_votos(
     mesmo local fisico e portanto o mesmo perfil demografico), informar a
     coluna que identifica o local fisico para usar erro-padrao robusto a
     cluster - sem isso, observacoes correlacionadas (mesmo predio)
-    fariam a regressao parecer mais precisa do que realmente e."""
+    fariam a regressao parecer mais precisa do que realmente e. Tambem
+    aceita uma LISTA de ate 2 colunas (cluster de 2 vias, ex.:
+    `["local_votacao_id", "CD_MUNICIPIO"]`) - usado pela "Regressao Geral"
+    de cargos estaduais (V2), onde observacoes tambem se agrupam por
+    municipio, alem de por predio."""
     variaveis_validas = [v for v in variaveis if v in df.columns]
-    tem_cluster = coluna_cluster is not None and coluna_cluster in df.columns
-    colunas = [coluna_alvo] + variaveis_validas + ([coluna_cluster] if tem_cluster else [])
+    colunas_cluster, issues_cluster = _resolver_colunas_cluster(df, coluna_cluster, "regressao_linear_votos")
+    tem_cluster = bool(colunas_cluster)
+    colunas = [coluna_alvo] + variaveis_validas + colunas_cluster
     dados = df[colunas].dropna(subset=[coluna_alvo] + variaveis_validas)
 
     variaveis_validas, issues_variancia = _remover_variaveis_sem_variancia(
@@ -92,12 +158,13 @@ def regressao_linear_votos(
     minimo = _AMOSTRA_MINIMA_POR_VARIAVEL * max(len(variaveis_validas), 1)
     issues = validar_amostra_minima(len(dados), minimo, "regressao_linear_votos")
     if issues or not variaveis_validas:
-        return None, issues_variancia + issues
+        return None, issues_cluster + issues_variancia + issues
 
     x = sm.add_constant(dados[variaveis_validas])
     y = dados[coluna_alvo]
     if tem_cluster:
-        modelo = sm.OLS(y, x).fit(cov_type="cluster", cov_kwds={"groups": dados[coluna_cluster]})
+        grupos = _grupos_cluster(dados, colunas_cluster)
+        modelo = sm.OLS(y, x).fit(cov_type="cluster", cov_kwds={"groups": grupos})
     else:
         modelo = sm.OLS(y, x).fit()
 
@@ -120,8 +187,9 @@ def regressao_linear_votos(
         intercepto=round(float(modelo.params.get("const", 0.0)), 4),
         variaveis_utilizadas=variaveis_validas,
         erro_padrao_cluster=tem_cluster,
+        colunas_cluster_utilizadas=colunas_cluster,
     )
-    return resultado, issues_variancia
+    return resultado, issues_cluster + issues_variancia
 
 
 @dataclass
@@ -137,6 +205,7 @@ class ResultadoRegressaoLogistica:
     interpretacoes: list[str]
     variaveis_utilizadas: list[str]
     erro_padrao_cluster: bool = False
+    colunas_cluster_utilizadas: list[str] = field(default_factory=list)
     limitacoes: str = (
         "Regressao logistica com dados agregados por territorio (ecological "
         "regression): as relacoes encontradas valem para o territorio, nao "
@@ -146,7 +215,17 @@ class ResultadoRegressaoLogistica:
     )
 
     def __post_init__(self) -> None:
-        if self.erro_padrao_cluster:
+        if self.erro_padrao_cluster and len(self.colunas_cluster_utilizadas) == 2:
+            self.limitacoes += (
+                " A unidade de observacao e mais fina que o territorio agregado usual "
+                f"(cluster de 2 vias: {self.colunas_cluster_utilizadas[0]} e "
+                f"{self.colunas_cluster_utilizadas[1]}) - o erro-padrao usado e robusto "
+                "a cluster nessas duas dimensoes simultaneamente, evitando superestimar "
+                "a precisao dos coeficientes/p-valores quando observacoes dentro do "
+                "mesmo local de votacao E dentro do mesmo municipio nao sao "
+                "independentes."
+            )
+        elif self.erro_padrao_cluster:
             self.limitacoes += (
                 " A unidade de observacao e a secao eleitoral (varias por local de "
                 "votacao); secoes do mesmo local compartilham o mesmo perfil "
@@ -162,7 +241,7 @@ def regressao_logistica_bom_desempenho(
     coluna_pct_votos: str,
     variaveis: list[str],
     limiar: float | None = None,
-    coluna_cluster: str | None = None,
+    coluna_cluster: str | list[str] | None = None,
 ) -> tuple[ResultadoRegressaoLogistica | None, list[DataIssue]]:
     """Classifica cada territorio como "boa votacao" (1) ou nao (0) e ajusta
     uma regressao logistica contra as variaveis demograficas informadas -
@@ -177,10 +256,14 @@ def regressao_logistica_bom_desempenho(
 
     `coluna_cluster` (opcional): ver documentacao equivalente em
     regressao_linear_votos - usar quando a unidade de observacao e mais
-    fina que o local de votacao (secao/urna)."""
+    fina que o local de votacao (secao/urna). Tambem aceita uma LISTA de
+    ate 2 colunas (cluster de 2 vias)."""
     variaveis_validas = [v for v in variaveis if v in df.columns]
-    tem_cluster = coluna_cluster is not None and coluna_cluster in df.columns
-    colunas = [coluna_pct_votos] + variaveis_validas + ([coluna_cluster] if tem_cluster else [])
+    colunas_cluster, issues_cluster = _resolver_colunas_cluster(
+        df, coluna_cluster, "regressao_logistica_bom_desempenho"
+    )
+    tem_cluster = bool(colunas_cluster)
+    colunas = [coluna_pct_votos] + variaveis_validas + colunas_cluster
     dados = df[colunas].dropna(subset=[coluna_pct_votos] + variaveis_validas)
 
     variaveis_validas, issues_variancia = _remover_variaveis_sem_variancia(
@@ -190,7 +273,7 @@ def regressao_logistica_bom_desempenho(
     minimo = _AMOSTRA_MINIMA_POR_VARIAVEL * max(len(variaveis_validas), 1)
     issues = validar_amostra_minima(len(dados), minimo, "regressao_logistica_bom_desempenho")
     if issues or not variaveis_validas:
-        return None, issues_variancia + issues
+        return None, issues_cluster + issues_variancia + issues
 
     limiar_usado = limiar if limiar is not None else float(dados[coluna_pct_votos].median())
     alvo = (dados[coluna_pct_votos] >= limiar_usado).astype(int)
@@ -209,14 +292,13 @@ def regressao_logistica_bom_desempenho(
     x = sm.add_constant(dados[variaveis_validas])
     try:
         if tem_cluster:
-            modelo = sm.Logit(alvo, x).fit(
-                disp=0, cov_type="cluster", cov_kwds={"groups": dados[coluna_cluster]}
-            )
+            grupos = _grupos_cluster(dados, colunas_cluster)
+            modelo = sm.Logit(alvo, x).fit(disp=0, cov_type="cluster", cov_kwds={"groups": grupos})
         else:
             modelo = sm.Logit(alvo, x).fit(disp=0)
     except Exception as exc:  # separacao perfeita ou nao-convergencia
         logger.warning("Regressao logistica nao convergiu: %s", exc)
-        return None, issues_variancia + [
+        return None, issues_cluster + issues_variancia + [
             DataIssue(
                 etapa="regressao_logistica_bom_desempenho",
                 severidade="erro",
@@ -274,5 +356,6 @@ def regressao_logistica_bom_desempenho(
         interpretacoes=interpretacoes,
         variaveis_utilizadas=variaveis_validas,
         erro_padrao_cluster=tem_cluster,
+        colunas_cluster_utilizadas=colunas_cluster,
     )
-    return resultado, issues_variancia
+    return resultado, issues_cluster + issues_variancia

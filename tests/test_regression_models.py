@@ -100,6 +100,92 @@ def test_regressao_linear_exclui_variavel_sem_variancia(base_territorio_sp):
     assert any("pct_constante" in i.mensagem for i in issues)
 
 
+def test_regressao_linear_cluster_2_vias_ativa_corretamente(base_territorio_sp):
+    """coluna_cluster aceita uma LISTA de ate 2 colunas (cluster de 2 vias,
+    usado pela "Regressao Geral" de cargos estaduais - unidade de
+    observacao mais fina que o municipio, onde ha 2 fontes de nao-
+    independencia simultaneas: mesmo predio E mesmo municipio). Precisa de
+    pelo menos 2 grupos em CADA dimensao (statsmodels divide por
+    n_grupos - 1 na correcao de 2 vias - 1 grupo so gera ZeroDivisionError)."""
+    base = base_territorio_sp.copy()
+    base["predio_id"] = base.index
+    base["municipio_id"] = base.index % 3
+    duplicado = pd.concat([base, base], ignore_index=True)
+    modelo, issues = regressao_linear_votos(
+        duplicado, "votos_candidato", VARIAVEIS_DEMOGRAFICAS,
+        coluna_cluster=["predio_id", "municipio_id"],
+    )
+    assert modelo is not None, f"modelo nao ajustado: {issues}"
+    assert modelo.erro_padrao_cluster is True
+    assert modelo.colunas_cluster_utilizadas == ["predio_id", "municipio_id"]
+    assert "cluster de 2 vias" in modelo.limitacoes
+    assert "robusto a cluster" in modelo.limitacoes
+
+
+def test_regressao_logistica_cluster_2_vias_ativa_corretamente(base_territorio_sp):
+    base = base_territorio_sp.copy()
+    base["predio_id"] = base.index
+    base["municipio_id"] = base.index % 3
+    duplicado = pd.concat([base, base], ignore_index=True)
+    modelo, issues = regressao_logistica_bom_desempenho(
+        duplicado, "pct_votos_validos_territorio", VARIAVEIS_DEMOGRAFICAS,
+        coluna_cluster=["predio_id", "municipio_id"],
+    )
+    assert modelo is not None, f"modelo nao ajustado: {issues}"
+    assert modelo.erro_padrao_cluster is True
+    assert modelo.colunas_cluster_utilizadas == ["predio_id", "municipio_id"]
+    assert "cluster de 2 vias" in modelo.limitacoes
+    assert "robusto a cluster" in modelo.limitacoes
+
+
+def test_regressao_linear_cluster_2_vias_com_dtypes_mistos(base_territorio_sp):
+    """Regressao: caso real de uso (secao_id/local_votacao_id sao STRING,
+    CD_MUNICIPIO e INTEIRO) quebrava dentro do statsmodels
+    (`cov_cluster_2groups`) com "Cannot change data-type for array of
+    references" - o `groups` vira um ndarray dtype=object (mistura de
+    string+int) e o `.view()` interno do statsmodels exige um dtype
+    homogeneo. Ver _grupos_cluster em src/regression_models.py."""
+    base = base_territorio_sp.copy()
+    base["local_votacao_id"] = "Local " + (base.index % 7).astype(str)
+    base["CD_MUNICIPIO"] = base.index % 3
+    modelo, issues = regressao_linear_votos(
+        base, "votos_candidato", VARIAVEIS_DEMOGRAFICAS,
+        coluna_cluster=["local_votacao_id", "CD_MUNICIPIO"],
+    )
+    assert modelo is not None, f"modelo nao ajustado: {issues}"
+    assert modelo.erro_padrao_cluster is True
+
+
+def test_regressao_linear_cluster_mais_de_2_colunas_trunca_com_aviso(base_territorio_sp):
+    """statsmodels so suporta ate 2 dimensoes de cluster simultaneas - mais
+    de 2 colunas devem ser truncadas (nunca descartadas silenciosamente:
+    um aviso explicito e emitido)."""
+    base = base_territorio_sp.copy()
+    base["predio_id"] = base.index
+    base["municipio_id"] = base.index % 3
+    base["extra_id"] = base.index % 5
+    modelo, issues = regressao_linear_votos(
+        base, "votos_candidato", VARIAVEIS_DEMOGRAFICAS,
+        coluna_cluster=["predio_id", "municipio_id", "extra_id"],
+    )
+    assert modelo is not None, f"modelo nao ajustado: {issues}"
+    assert modelo.colunas_cluster_utilizadas == ["predio_id", "municipio_id"]
+    assert any("mais de 2 colunas" in i.mensagem for i in issues)
+
+
+def test_regressao_linear_cluster_coluna_ausente_degrada_graciosamente(base_territorio_sp):
+    """Coluna de cluster que nao existe na amostra deve ser ignorada com
+    aviso, sem quebrar a regressao (mesmo comportamento ja existente para
+    uma unica coluna string ausente)."""
+    modelo, issues = regressao_linear_votos(
+        base_territorio_sp, "votos_candidato", VARIAVEIS_DEMOGRAFICAS,
+        coluna_cluster="coluna_que_nao_existe",
+    )
+    assert modelo is not None, f"modelo nao ajustado: {issues}"
+    assert modelo.erro_padrao_cluster is False
+    assert any("ausente" in i.mensagem for i in issues)
+
+
 def test_regressao_logistica_amostra_insuficiente_retorna_none():
     import pandas as pd
 

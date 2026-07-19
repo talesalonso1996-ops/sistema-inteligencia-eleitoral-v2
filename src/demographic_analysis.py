@@ -267,6 +267,31 @@ def perfil_demografico_por_setor(setores_de_interesse: set[str]) -> pd.DataFrame
     return perfil
 
 
+def agregados_populacionais_municipio(
+    pontos_com_setor: pd.DataFrame, perfil_por_setor: pd.DataFrame
+) -> pd.DataFrame:
+    """Soma populacao_total por MUNICIPIO (nao por territorio fino), a
+    partir dos setores censitarios cobertos pelos locais de votacao do
+    municipio - usada pela "Regressao Geral" de cargos estaduais (V2) como
+    covariavel opcional de "porte do municipio", mesclada (merge/broadcast)
+    de volta em cada linha fina (zona/secao) do mesmo municipio.
+
+    Dedup por `local_votacao_id` ANTES de somar: varias secoes/zonas
+    compartilham o mesmo local de votacao (mesmo predio/setor), somar por
+    linha inflaria o total por N linhas do mesmo predio. Deliberadamente
+    uma funcao NOVA, nao uma extensao de perfil_demografico_do_territorio
+    (aquela calcula MEDIA ponderada por votos por territorio - somar
+    populacao bruta por municipio e uma semantica diferente, por isso
+    populacao_total ja e excluida da lista de variaveis dela)."""
+    unicos = pontos_com_setor.drop_duplicates(subset=["local_votacao_id"])
+    base = unicos.merge(perfil_por_setor[["CD_SETOR", "populacao_total"]], on="CD_SETOR", how="left")
+    return (
+        base.groupby("CD_MUNICIPIO", as_index=False)["populacao_total"]
+        .sum()
+        .rename(columns={"populacao_total": "populacao_total_municipio"})
+    )
+
+
 def perfil_demografico_do_territorio(
     pontos_com_setor: pd.DataFrame, perfil_por_setor: pd.DataFrame, nivel: str
 ) -> pd.DataFrame:

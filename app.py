@@ -56,7 +56,11 @@ from src.competitor_analysis import (
     zonas_de_disputa,
 )
 from src.correlation_analysis import correlacoes_com_votos
-from src.demographic_analysis import perfil_demografico_do_territorio, perfil_demografico_por_setor
+from src.demographic_analysis import (
+    agregados_populacionais_municipio,
+    perfil_demografico_do_territorio,
+    perfil_demografico_por_setor,
+)
 from src.economic_analysis import carregar_perfil_economico_municipio
 from src.electoral_metrics import (
     desempenho_territorial,
@@ -86,7 +90,7 @@ from src.potential_index import calcular_indice_performance
 from src.regression_models import regressao_linear_votos, regressao_logistica_bom_desempenho
 from src.report_generator import DadosRelatorio, gerar_relatorio_html, gerar_relatorio_pdf
 from src.utils import indicators_config, resolve_path
-from src.vote_filtering import secao_composta
+from src.vote_filtering import secao_composta, zona_uf_composta
 from src.voronoi_analysis import gerar_voronoi
 import src.charts as charts
 import src.maps as maps
@@ -355,21 +359,33 @@ def _carregar_geografia_estadual_secao(numero, uf, cargo, ano, turno, _candidatu
 
 
 @st.cache_data(show_spinner=False)
-def _carregar_demografia_estadual(
-    numero, uf, cargo, ano, turno, _enriquecido: pd.DataFrame, _vd: pd.DataFrame,
+def _carregar_demografia_estadual_generica(
+    numero, uf, cargo, ano, turno, _enriquecido: pd.DataFrame, _vd: pd.DataFrame, nivel: str,
 ):
-    """Equivalente a _carregar_demografia, mas agregado por MUNICIPIO (nao
-    por secao/predio) - unidade natural para uma disputa estadual: da uma
-    amostra grande o suficiente para regressao/clusterizacao (centenas de
-    municipios) sem precisar de granularidade de secao, que so faz sentido
-    dentro de 1 municipio."""
-    nivel = "CD_MUNICIPIO"
+    """Como _carregar_demografia_estadual, mas parametrizada por `nivel` -
+    permite agregar por CD_MUNICIPIO (regressao por municipio, ja existente,
+    ver _carregar_demografia_estadual) OU por uma granularidade mais fina
+    cobrindo a UF inteira (zona_uf_composta ou secao_id - "Regressao Geral",
+    usada quando o numero de municipios da UF e pequeno demais para a
+    regressao por municipio convergir, ver src/regression_models.py).
+
+    Quando `nivel` nao e CD_MUNICIPIO, preserva CD_MUNICIPIO (e
+    local_votacao_id, quando presente) agregados por "first": cada zona/secao
+    pertence a exatamente 1 municipio (e cada secao a exatamente 1 local de
+    votacao), entao nao ha ambiguidade - essas colunas sao usadas depois
+    para cluster de 2 vias e para mesclar covariaveis de porte do
+    municipio."""
     setores = set(_enriquecido["CD_SETOR"].dropna().unique()) if "CD_SETOR" in _enriquecido else set()
-    if not setores:
+    if not setores or nivel not in _enriquecido.columns or _enriquecido[nivel].notna().sum() == 0:
         return pd.DataFrame(), pd.DataFrame()
     perfil_setor = perfil_demografico_por_setor(setores)
     perfil_territorio = perfil_demografico_do_territorio(_enriquecido, perfil_setor, nivel)
-    votos_territorio = _enriquecido.groupby(nivel, as_index=False)["votos_candidato"].sum()
+    agregacoes = {"votos_candidato": ("votos_candidato", "sum")}
+    if nivel != "CD_MUNICIPIO" and "CD_MUNICIPIO" in _enriquecido.columns:
+        agregacoes["CD_MUNICIPIO"] = ("CD_MUNICIPIO", "first")
+    if "local_votacao_id" in _enriquecido.columns and nivel != "local_votacao_id":
+        agregacoes["local_votacao_id"] = ("local_votacao_id", "first")
+    votos_territorio = _enriquecido.groupby(nivel, as_index=False).agg(**agregacoes)
     total_validos = total_votos_validos_por_territorio(_vd, _enriquecido, nivel)
     base = (
         votos_territorio.merge(perfil_territorio, on=nivel, how="inner")
@@ -379,6 +395,18 @@ def _carregar_demografia_estadual(
         100 * base["votos_candidato"] / base["votos_validos_territorio"]
     ).round(2)
     return perfil_setor, base
+
+
+@st.cache_data(show_spinner=False)
+def _carregar_demografia_estadual(
+    numero, uf, cargo, ano, turno, _enriquecido: pd.DataFrame, _vd: pd.DataFrame,
+):
+    """Equivalente a _carregar_demografia, mas agregado por MUNICIPIO (nao
+    por secao/predio) - unidade natural para uma disputa estadual: da uma
+    amostra grande o suficiente para regressao/clusterizacao (centenas de
+    municipios) sem precisar de granularidade de secao, que so faz sentido
+    dentro de 1 municipio."""
+    return _carregar_demografia_estadual_generica(numero, uf, cargo, ano, turno, _enriquecido, _vd, "CD_MUNICIPIO")
 
 
 st.sidebar.header("Selecione a disputa")
@@ -1144,6 +1172,34 @@ elif secao == "Estatistica Avancada":
     if not uf_tem_malha_completa(candidatura.uf):
         st.info(f"Malha geografica nao configurada para a UF '{candidatura.uf}'.")
     else:
+        _regressao_geral_estadual = False
+        _granularidade_geral = None
+        _usar_covariaveis_municipio = False
+        if not _eh_municipal and _modo_estadual == "municipio":
+            _modo_regressao_label = st.radio(
+                "Tipo de analise estatistica",
+                ["Regressao por Municipio", "Regressao Geral (zona/secao, UF inteira)"],
+                horizontal=True, key="v2_modo_regressao_estadual",
+            )
+            _regressao_geral_estadual = _modo_regressao_label.startswith("Regressao Geral")
+            if _regressao_geral_estadual:
+                _explicacao(
+                    "A 'Regressao por Municipio' pode falhar em UFs com poucos municipios "
+                    "(amostra pequena demais). A 'Regressao Geral' usa zona ou secao "
+                    "eleitoral (UF inteira) como unidade de observacao - muito mais "
+                    "observacoes - e o municipio entra como fator via erro-padrao robusto "
+                    "a cluster (e, opcionalmente, como covariavel de porte)."
+                )
+                _granularidade_geral = st.radio(
+                    "Unidade de observacao", ["Zona eleitoral", "Secao eleitoral"],
+                    horizontal=True, key="v2_granularidade_geral",
+                )
+                _usar_covariaveis_municipio = st.checkbox(
+                    "Incluir populacao e votos validos do municipio como variaveis",
+                    key="v2_covariaveis_municipio",
+                )
+
+        nivel_geral = None
         with st.spinner("Calculando correlacoes, regressoes e clusterizacao..."):
             if _eh_municipal:
                 _, enriquecido_est, _ = _geo_secao()
@@ -1159,6 +1215,28 @@ elif secao == "Estatistica Avancada":
                     candidatura.numero, _municipio_bairro_codigo, candidatura.cargo,
                     candidatura.ano_eleicao, candidatura.turno, enriquecido_est, vd,
                 )
+            elif _regressao_geral_estadual:
+                _, enriquecido_est_uf, avisos_est = _geo_uf_secao()
+                for aviso in avisos_est:
+                    st.warning(aviso)
+                enriquecido_est = enriquecido_est_uf.copy()
+                if _granularidade_geral == "Zona eleitoral":
+                    enriquecido_est["zona_uf_composta"] = zona_uf_composta(enriquecido_est)
+                    nivel_geral = "zona_uf_composta"
+                else:
+                    nivel_geral = "secao_id"
+                perfil_setor, base_territorio = _carregar_demografia_estadual_generica(
+                    candidatura.numero, candidatura.uf, candidatura.cargo,
+                    candidatura.ano_eleicao, candidatura.turno, enriquecido_est, vd, nivel_geral,
+                )
+                if _usar_covariaveis_municipio and not base_territorio.empty:
+                    pop_municipio = agregados_populacionais_municipio(enriquecido_est, perfil_setor)
+                    votos_municipio = total_votos_validos_por_territorio(
+                        vd, enriquecido_est, "CD_MUNICIPIO"
+                    ).rename(columns={"votos_validos_territorio": "votos_validos_municipio"})
+                    base_territorio = base_territorio.merge(
+                        pop_municipio, on="CD_MUNICIPIO", how="left"
+                    ).merge(votos_municipio, on="CD_MUNICIPIO", how="left")
             else:
                 _, enriquecido_est, avisos_est = _geo_uf()
                 for aviso in avisos_est:
@@ -1169,6 +1247,14 @@ elif secao == "Estatistica Avancada":
             _explicacao(
                 f"Unidade de observacao: secao eleitoral, restrito a {_municipio_bairro_nome} "
                 f"(UF {candidatura.uf}) - {len(base_territorio)} secoes."
+            )
+        elif _regressao_geral_estadual and not base_territorio.empty:
+            _unidade_geral = "zona eleitoral" if nivel_geral == "zona_uf_composta" else "secao eleitoral"
+            _n_municipios_geral = base_territorio["CD_MUNICIPIO"].nunique() if "CD_MUNICIPIO" in base_territorio else 0
+            _explicacao(
+                f"Unidade de observacao: {_unidade_geral} (UF {candidatura.uf} inteira, "
+                f"{len(base_territorio)} observacoes, {_n_municipios_geral} municipios) - "
+                "Regressao Geral."
             )
         elif not _eh_municipal and not base_territorio.empty:
             _explicacao(
@@ -1181,8 +1267,40 @@ elif secao == "Estatistica Avancada":
             st.info("Dados insuficientes para analise estatistica territorial.")
         else:
             variaveis_disp = [v for v in VARIAVEIS_DEMOGRAFICAS if v in base_territorio.columns]
+            if _usar_covariaveis_municipio:
+                variaveis_disp += [
+                    v for v in ["populacao_total_municipio", "votos_validos_municipio"]
+                    if v in base_territorio.columns
+                ]
+
+            _coluna_cluster_ativa = _COLUNA_CLUSTER_REGRESSAO
+            if _regressao_geral_estadual:
+                _coluna_cluster_ativa = (
+                    ["local_votacao_id", "CD_MUNICIPIO"] if nivel_geral == "secao_id"
+                    else ["CD_MUNICIPIO"]
+                )
+                _n_municipios_dummy = base_territorio["CD_MUNICIPIO"].nunique() if "CD_MUNICIPIO" in base_territorio else 0
+                if 0 < _n_municipios_dummy <= 30:
+                    _usar_dummy_municipio = st.checkbox(
+                        "Incluir municipio como variavel dummy completa (1 coluna por "
+                        f"municipio - disponivel porque esta UF tem so {_n_municipios_dummy} "
+                        "municipios, limite de 30)",
+                        key="v2_dummy_municipio",
+                    )
+                    if _usar_dummy_municipio:
+                        # pd.get_dummies gera colunas dtype bool - misturado com as
+                        # colunas float das demais variaveis, o statsmodels rejeita
+                        # o DataFrame inteiro ("Pandas data cast to numpy dtype of
+                        # object"). astype(int) evita o dtype misto.
+                        _dummies_municipio = pd.get_dummies(
+                            base_territorio[["CD_MUNICIPIO"]].astype(str), prefix="mun", drop_first=True
+                        ).astype(int)
+                        base_territorio = pd.concat([base_territorio, _dummies_municipio], axis=1)
+                        variaveis_disp += list(_dummies_municipio.columns)
+
             nivel_estatistica = (
-                "CD_MUNICIPIO" if (not _eh_municipal and _modo_estadual == "municipio")
+                nivel_geral if _regressao_geral_estadual
+                else "CD_MUNICIPIO" if (not _eh_municipal and _modo_estadual == "municipio")
                 else _NIVEL_TERRITORIO_DEMOGRAFICO
             )
 
@@ -1204,7 +1322,7 @@ elif secao == "Estatistica Avancada":
                 st.subheader("Regressao linear (votos por territorio)")
                 reg, issues_reg = regressao_linear_votos(
                     base_territorio, "votos_candidato", variaveis_disp,
-                    coluna_cluster=_COLUNA_CLUSTER_REGRESSAO,
+                    coluna_cluster=_coluna_cluster_ativa,
                 )
                 for issue in issues_reg:
                     st.warning(issue.mensagem)
@@ -1224,7 +1342,7 @@ elif secao == "Estatistica Avancada":
                 )
                 modelo_log, issues_log = regressao_logistica_bom_desempenho(
                     base_territorio, "pct_votos_validos_territorio", variaveis_disp,
-                    coluna_cluster=_COLUNA_CLUSTER_REGRESSAO,
+                    coluna_cluster=_coluna_cluster_ativa,
                 )
                 for issue in issues_log:
                     st.warning(issue.mensagem)

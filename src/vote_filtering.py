@@ -69,3 +69,24 @@ def secao_composta(votos: pd.DataFrame) -> pd.Series:
     composta como nivel territorial quando o usuario escolhe 'Secao
     eleitoral', nunca a coluna NR_SECAO isolada."""
     return "Zona " + votos["NR_ZONA"].astype(str) + " - Secao " + votos["NR_SECAO"].astype(str)
+
+
+def zona_uf_composta(votos: pd.DataFrame) -> pd.Series:
+    """Identificador unico de zona eleitoral NO ESCOPO DA UF INTEIRA
+    (municipio + zona) - usado pela "Regressao Geral" de cargos estaduais
+    (V2), que precisa agrupar por zona cobrindo TODOS os municipios da UF
+    de uma vez.
+
+    NR_ZONA sozinho NAO identifica uma zona de forma unica entre
+    municipios da mesma UF: uma zona eleitoral e uma comarca/circunscricao
+    que costuma cobrir varios municipios pequenos ao mesmo tempo -
+    verificado com dados reais (DuckDB contra votacao_secao_2022): no
+    Acre, 8 das 9 zonas do estado sao compartilhadas por 2 a 5 municipios
+    distintos; em SP, 178 das 393 zonas sao compartilhadas por 2 a 7
+    municipios. Agrupar por NR_ZONA cru numa analise de UF inteira somaria
+    votos de municipios DIFERENTES sob um unico rotulo, e tornaria
+    CD_MUNICIPIO ambiguo como covariavel dessas linhas - por isso a chave
+    aqui inclui CD_MUNICIPIO, ao contrario de secao_composta acima (que so
+    precisa de NR_ZONA+NR_SECAO porque sempre e usada dentro de UM
+    municipio ja conhecido)."""
+    return votos["CD_MUNICIPIO"].astype(str) + " - Zona " + votos["NR_ZONA"].astype(str)

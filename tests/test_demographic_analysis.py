@@ -1,4 +1,7 @@
+import pandas as pd
 import pytest
+
+from src.demographic_analysis import agregados_populacionais_municipio
 
 _COLUNAS_PERCENTUAIS_NOVAS = [
     "pct_domicilios_chefia_feminina", "pct_agua_encanada", "pct_esgoto_adequado", "pct_coleta_lixo",
@@ -15,3 +18,42 @@ def test_variaveis_parentesco_domicilio_ficam_em_0_100(base_territorio_sp, colun
     valores = base_territorio_sp[coluna].dropna()
     assert not valores.empty, f"{coluna} deveria ter pelo menos um valor nao nulo na amostra de teste"
     assert (valores >= 0).all() and (valores <= 100).all()
+
+
+def test_agregados_populacionais_municipio_dedup_por_local_antes_de_somar():
+    """Regressao: 3 secoes do MESMO local de votacao (mesmo predio/setor)
+    nao podem inflar a populacao do municipio por 3x - dedup por
+    local_votacao_id precisa acontecer ANTES da soma."""
+    pontos_com_setor = pd.DataFrame({
+        # as 3 primeiras linhas sao SECOES diferentes do MESMO local de
+        # votacao (predio) - local_votacao_id repete, so secao_id (nao usado
+        # aqui) mudaria.
+        "local_votacao_id": ["Escola A (Zona 1, Local 1)", "Escola A (Zona 1, Local 1)",
+                              "Escola A (Zona 1, Local 1)", "Escola B (Zona 1, Local 2)"],
+        "CD_SETOR": ["SETOR_1", "SETOR_1", "SETOR_1", "SETOR_2"],
+        "CD_MUNICIPIO": [1001, 1001, 1001, 1001],
+    })
+    perfil_por_setor = pd.DataFrame({
+        "CD_SETOR": ["SETOR_1", "SETOR_2"],
+        "populacao_total": [1000, 500],
+    })
+    resultado = agregados_populacionais_municipio(pontos_com_setor, perfil_por_setor)
+    assert len(resultado) == 1
+    assert resultado.loc[0, "CD_MUNICIPIO"] == 1001
+    assert resultado.loc[0, "populacao_total_municipio"] == 1500
+
+
+def test_agregados_populacionais_municipio_separa_por_municipio():
+    pontos_com_setor = pd.DataFrame({
+        "local_votacao_id": ["Local A", "Local B"],
+        "CD_SETOR": ["SETOR_1", "SETOR_2"],
+        "CD_MUNICIPIO": [1001, 1002],
+    })
+    perfil_por_setor = pd.DataFrame({
+        "CD_SETOR": ["SETOR_1", "SETOR_2"],
+        "populacao_total": [1000, 2000],
+    })
+    resultado = agregados_populacionais_municipio(pontos_com_setor, perfil_por_setor)
+    assert set(resultado["CD_MUNICIPIO"]) == {1001, 1002}
+    assert resultado.set_index("CD_MUNICIPIO").loc[1001, "populacao_total_municipio"] == 1000
+    assert resultado.set_index("CD_MUNICIPIO").loc[1002, "populacao_total_municipio"] == 2000
