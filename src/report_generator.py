@@ -236,13 +236,6 @@ def gerar_relatorio_html(dados: DadosRelatorio) -> str:
 </body></html>"""
 
 
-def salvar_relatorio_html(dados: DadosRelatorio, caminho: str | Path) -> Path:
-    caminho = Path(caminho)
-    caminho.parent.mkdir(parents=True, exist_ok=True)
-    caminho.write_text(gerar_relatorio_html(dados), encoding="utf-8")
-    return caminho
-
-
 def _figura_para_imagem(fig: go.Figure, largura_px: int = 900, altura_px: int = 450) -> Image:
     """Renderiza a figura como PNG estatico para o PDF - sempre em tema
     claro (fundo escuro do dashboard fica ilegivel impresso/na tela do PDF)."""

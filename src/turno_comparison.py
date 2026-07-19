@@ -98,23 +98,3 @@ def comparar_turnos(
         variacao_comparecimento_pct=variacao_comparecimento,
         detalhe_territorial=detalhe,
     )
-
-
-def comparar_turnos_vs_concorrente(
-    delta_candidato_t1: pd.DataFrame, delta_candidato_t2: pd.DataFrame, nivel: str, nome_concorrente: str,
-) -> pd.DataFrame:
-    """Variacao do DELTA contra um concorrente especifico (saida de
-    competitor_analysis.delta_vs_rivais, coluna 'delta') entre T1 e T2 -
-    mostra onde o candidato melhorou/piorou frente a esse rival
-    especificamente, territorio a territorio."""
-    t1 = delta_candidato_t1[delta_candidato_t1["rival"] == nome_concorrente][[nivel, "delta"]].rename(
-        columns={"delta": "delta_t1"}
-    )
-    t2 = delta_candidato_t2[delta_candidato_t2["rival"] == nome_concorrente][[nivel, "delta"]].rename(
-        columns={"delta": "delta_t2"}
-    )
-    comparado = t1.merge(t2, on=nivel, how="outer")
-    comparado["delta_t1"] = comparado["delta_t1"].fillna(0)
-    comparado["delta_t2"] = comparado["delta_t2"].fillna(0)
-    comparado["variacao_delta"] = comparado["delta_t2"] - comparado["delta_t1"]
-    return comparado.sort_values("variacao_delta", ascending=False).reset_index(drop=True)

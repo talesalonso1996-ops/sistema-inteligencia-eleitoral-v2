@@ -60,10 +60,3 @@ def _classificar_forca(r: float) -> str:
     if a < 0.5:
         return "moderada"
     return "forte"
-
-
-def matriz_correlacao(df: pd.DataFrame, variaveis: list[str]) -> pd.DataFrame:
-    """Matriz de correlacao (Pearson) entre todas as variaveis informadas -
-    util para identificar multicolinearidade antes da regressao."""
-    cols = [v for v in variaveis if v in df.columns]
-    return df[cols].corr(method="pearson").round(3)

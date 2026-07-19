@@ -44,13 +44,6 @@ logger = get_logger(__name__)
 # Rotulos usados pelo TSE para votos que nao correspondem a um candidato real.
 _ROTULOS_VOTO_NAO_NOMINAL = ("VOTO NULO", "VOTO BRANCO", "VOTO EM LEGENDA")
 
-# Prioridade de deferimento usada para ordenar candidaturas homonimas
-# (secao 2 do briefing: priorizar deferidas/deferidas com recurso).
-_PRIORIDADE_SITUACAO = {
-    "DEFERIDO": 0,
-    "DEFERIDO COM RECURSO": 1,
-}
-
 # Colunas realmente usadas pelas analises downstream. Evita "SELECT *" no
 # arquivo de 2,7 GB (~40 colunas, muitas de texto repetido por linha), que
 # em maquinas com pouca RAM livre pode estourar memoria ao materializar o
@@ -274,15 +267,6 @@ def eleicao_mais_recente(candidaturas: list[Candidatura]) -> list[Candidatura]:
     ano_max = max(c.ano_eleicao for c in candidaturas)
     turno_max = max(c.turno for c in candidaturas if c.ano_eleicao == ano_max)
     return [c for c in candidaturas if c.ano_eleicao == ano_max and c.turno == turno_max]
-
-
-def ordenar_por_prioridade_deferimento(candidaturas: list[Candidatura]) -> list[Candidatura]:
-    """Ordena priorizando candidaturas deferidas/deferidas com recurso
-    (secao 2 do briefing), mantendo as demais ao final."""
-    return sorted(
-        candidaturas,
-        key=lambda c: _PRIORIDADE_SITUACAO.get(c.situacao_candidatura.upper(), 99),
-    )
 
 
 def votos_da_candidatura(candidatura: Candidatura) -> pd.DataFrame:

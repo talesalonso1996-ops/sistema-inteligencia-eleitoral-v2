@@ -19,7 +19,6 @@ import pandas as pd
 from scipy import stats
 
 from .candidate_finder import Candidatura
-from .data_validation import validar_amostra_minima
 from .utils import DataIssue
 from .vote_filtering import votos_legenda as _votos_legenda
 from .vote_filtering import votos_nominais as _votos_nominais

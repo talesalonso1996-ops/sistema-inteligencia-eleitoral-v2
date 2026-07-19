@@ -185,11 +185,6 @@ def _tom_resultado(resultado_final: str) -> str:
     return "ruim"
 
 
-def _tom_classificacao(classificacao: str) -> str:
-    return {"fortaleza": "bom", "consolidado": "bom", "competitivo": "neutro",
-            "crescimento": "neutro", "baixa_penetracao": "ruim"}.get(classificacao, "neutro")
-
-
 def _tom_rotulo_acao(rotulo: str) -> str:
     return {"Fortaleza": "bom", "Consolidar": "neutro", "Alto potencial": "neutro",
             "Baixa prioridade": "ruim"}.get(rotulo, "neutro")

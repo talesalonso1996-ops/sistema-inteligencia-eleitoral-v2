@@ -16,12 +16,6 @@ from .utils import crs_metrico_utm, get_logger
 logger = get_logger(__name__)
 
 
-def _fronteira_municipio(malha: gpd.GeoDataFrame) -> shapely.Geometry:
-    """Uniao de todos os poligonos da malha (setores ou bairros) do
-    municipio - usado para recortar o diagrama de Voronoi nos limites reais."""
-    return malha.union_all()
-
-
 def gerar_voronoi(
     pontos: pd.DataFrame, malha_municipio: gpd.GeoDataFrame
 ) -> gpd.GeoDataFrame | None:

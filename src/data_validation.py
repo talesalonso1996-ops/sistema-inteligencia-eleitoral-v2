@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from .utils import DataIssue, get_logger
-
-logger = get_logger(__name__)
+from .utils import DataIssue
 
 
 def validar_totais_votos(
@@ -123,11 +121,3 @@ def validar_amostra_minima(n_observacoes: int, minimo: int, nome_analise: str) -
             )
         )
     return issues
-
-
-def log_issues(issues: list[DataIssue]) -> None:
-    for issue in issues:
-        if issue.severidade == "erro":
-            logger.error("[%s] %s", issue.etapa, issue.mensagem)
-        else:
-            logger.warning("[%s] %s", issue.etapa, issue.mensagem)

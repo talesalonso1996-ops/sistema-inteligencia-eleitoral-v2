@@ -15,8 +15,6 @@ grandes demais) e precisa ser reconstituido a cada novo container.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import requests
 import streamlit as st
 
