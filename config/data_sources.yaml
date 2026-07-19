@@ -209,9 +209,10 @@ variaveis_excluidas_automaticamente:
 # src/uf_data_bootstrap.py), nunca pre-carregados aqui.
 pacote_cloud:
   descricao: "Download automatico dos arquivos nacionais quando ausentes localmente"
-  url_base: "https://github.com/talesalonso1996-ops/sistema-inteligencia-eleitoral/releases/download/dados-v2"
+  url_base: "https://github.com/talesalonso1996-ops/sistema-inteligencia-eleitoral-v2/releases/download/dados-v2"
   arquivos:
     - "consulta_cand_2024_BR.parquet"
+    - "consulta_cand_2022_BR.parquet"
     - "eleitorado_local_votacao_BR.parquet"
     - "detalhe_votacao_secao_2024_BR.parquet"
     - "demografia_setores_BR.parquet"
