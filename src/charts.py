@@ -175,6 +175,24 @@ def grafico_indice_concentracao(hhi: float) -> go.Figure:
     return _aplicar_layout(fig, "Concentracao territorial dos votos (HHI)", altura=280)
 
 
+def grafico_curva_lorenz(curva_lorenz: pd.DataFrame) -> go.Figure:
+    """Curva de Lorenz da concentracao do voto entre municipios da UF (V2,
+    cargos estaduais) - reta diagonal = distribuicao perfeitamente
+    igualitaria; quanto mais a curva se afasta dela, mais concentrado."""
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=curva_lorenz["pct_municipios_acumulado"], y=curva_lorenz["pct_votos_acumulado"],
+        mode="lines", line=dict(color=COR_CANDIDATO, width=3), name="Curva de Lorenz",
+    ))
+    fig.add_trace(go.Scatter(
+        x=[0, 100], y=[0, 100], mode="lines",
+        line=dict(color="#5b6270", width=1, dash="dash"), name="Igualdade perfeita",
+    ))
+    fig.update_xaxes(title="% de municipios (acumulado)")
+    fig.update_yaxes(title="% de votos (acumulado)")
+    return _aplicar_layout(fig, "Concentracao do voto entre municipios (curva de Lorenz)")
+
+
 def grafico_correlacoes(correlacoes: pd.DataFrame) -> go.Figure:
     """Barras horizontais divergentes (azul<->vermelho) para o coeficiente
     de correlacao de cada variavel demografica com os votos."""

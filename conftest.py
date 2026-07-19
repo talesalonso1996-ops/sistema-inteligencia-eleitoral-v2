@@ -30,6 +30,20 @@ def candidatura_sp():
 
 
 @pytest.fixture(scope="session")
+def candidatura_prefeito_sp():
+    """Candidatura MAJORITARIA (Prefeito) real, para cobrir o caso em que o
+    numero de urna do candidato coincide com o numero do partido (bug real
+    encontrado e corrigido em vote_filtering.py, tanto no V1 quanto aqui) -
+    a suite anterior so tinha fixtures de cargo PROPORCIONAL (Vereador),
+    nunca exercitando essa colisao."""
+    candidaturas = buscar_candidaturas(15)
+    return next(
+        c for c in candidaturas
+        if c.municipio == "SÃO PAULO" and c.cargo.upper() == "PREFEITO" and c.turno == 1
+    )
+
+
+@pytest.fixture(scope="session")
 def dados_disputa(candidatura_sp):
     vc = votos_da_candidatura(candidatura_sp)
     vd = votos_da_disputa(candidatura_sp)

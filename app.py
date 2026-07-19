@@ -1,9 +1,19 @@
-"""Sistema de Inteligencia Eleitoral - interface Streamlit.
+"""Sistema de Inteligencia Eleitoral V2 - interface Streamlit.
 
-Fluxo: usuario informa apenas o numero do candidato -> sistema busca todas
-as candidaturas possiveis (TSE, SP, 2024) -> usuario escolhe a correta
-(cidade/cargo) -> dashboard completo: visao geral, concorrencia, territorio,
-geografia, demografia, estatistica avancada e relatorio.
+Fluxo guiado principal: Eleicao -> UF -> [Municipio, so 2024] -> Cargo ->
+Candidato (barra lateral) -> resumo da selecao -> botao "Gerar analise
+eleitoral". A busca direta por numero do candidato (fluxo original da V1,
+2024 apenas) continua disponivel como alternativa, num expander da barra
+lateral - nao foi removida.
+
+Cargos municipais (Prefeito/Vereador, 2024) usam o MESMO caminho de dados
+e as MESMAS 8 secoes de analise da V1, sem nenhuma mudanca de logica.
+Cargos estaduais (Governador - piloto 2022/SP) usam as funcoes
+generalizadas de src/candidate_finder.py e mostram um subconjunto de
+secoes (Visao Geral/Concorrencia/Territorio por municipio/Indicadores
+Estaduais) - Geografia/Demografia/Estatistica Avancada/Maslow dependem da
+malha de setores censitarios de UM municipio e ficam fora do escopo deste
+piloto (ver plano da V2).
 
 Identidade visual: dashboard escuro ("war room"), paleta consistente com
 src/charts.py e .streamlit/config.toml.
@@ -17,10 +27,22 @@ from streamlit_folium import st_folium
 from src.candidate_finder import (
     Candidatura,
     buscar_candidaturas,
+    buscar_candidatos_disputa,
+    listar_municipios_uf,
     registro_candidatos_disputa,
+    registro_candidatos_disputa_generalizado,
     votos_da_candidatura,
+    votos_da_candidatura_generalizado,
     votos_da_disputa,
+    votos_da_disputa_generalizado,
 )
+from src.rules.electoral_scope import cargos_disponiveis, resolver_escopo
+from src.state_scope_indicators import (
+    calcular_concentracao_territorial,
+    calcular_indice_capilaridade,
+    calcular_presenca_eleitoral,
+)
+from src.uf_nomes import UF_NOME
 from src.clustering import gerar_narrativa_clusters, segmentar_territorios
 from src.competitor_analysis import (
     concorrentes_diretos,
@@ -208,6 +230,37 @@ def _carregar_dados_candidatura(numero, municipio_tse, cargo, ano, turno):
 
 
 @st.cache_data(show_spinner=False)
+def _listar_municipios(ano: int, uf: str) -> pd.DataFrame:
+    return listar_municipios_uf(ano, uf)
+
+
+@st.cache_data(show_spinner=False)
+def _buscar_candidatos_guiado(ano: int, cargo: str, uf: str, municipio_codigo, turno: int) -> list[Candidatura]:
+    return buscar_candidatos_disputa(ano, cargo, uf=uf, municipio_codigo=municipio_codigo, turno=turno)
+
+
+@st.cache_data(show_spinner=False)
+def _carregar_dados_candidatura_v2(ano: int, cargo: str, uf: str, municipio_codigo, turno: int, numero: int):
+    """Equivalente a _carregar_dados_candidatura, mas alimentado pelo fluxo
+    guiado em cascata (Eleicao->UF->[Municipio]->Cargo->Candidato) em vez
+    da busca por numero - cobre tambem cargos estaduais (municipio_codigo
+    None), usando as funcoes _generalizado quando aplicavel."""
+    candidatos = _buscar_candidatos_guiado(ano, cargo, uf, municipio_codigo, turno)
+    candidatura = next(c for c in candidatos if c.numero == numero)
+    if candidatura.codigo_municipio_tse is not None:
+        vc = votos_da_candidatura(candidatura)
+        vd = votos_da_disputa(candidatura)
+        rd = registro_candidatos_disputa(candidatura)
+    else:
+        vc = votos_da_candidatura_generalizado(candidatura)
+        vd = votos_da_disputa_generalizado(candidatura)
+        rd = registro_candidatos_disputa_generalizado(candidatura)
+    vc["NR_SECAO_COMPOSTA"] = secao_composta(vc)
+    vd["NR_SECAO_COMPOSTA"] = secao_composta(vd)
+    return candidatura, vc, vd, rd
+
+
+@st.cache_data(show_spinner=False)
 def _carregar_geografia(numero, municipio_tse, cargo, ano, turno, _candidatura: Candidatura, _vc: pd.DataFrame):
     coords = carregar_coordenadas_locais(_candidatura)
     pontos = juntar_votos_com_coordenadas(_vc, coords)
@@ -255,45 +308,118 @@ def _carregar_demografia(
     return perfil_setor, base
 
 
-st.title("Sistema de Inteligencia Eleitoral")
-st.caption(
-    "Dados oficiais TSE (votacao por secao + consulta de candidatos, Eleicoes "
-    "Municipais 2024, Brasil inteiro) e IBGE (Censo Demografico 2022). Informe "
-    "apenas o numero do candidato - a primeira busca em um estado novo pode "
-    "levar alguns minutos (baixando os dados oficiais daquela UF)."
-)
+st.sidebar.header("Selecione a disputa")
 
-numero_input = st.text_input("Numero do candidato", placeholder="ex.: 15900")
+_ANO_LABELS = {2024: "2024 - Eleicoes Municipais", 2022: "2022 - Eleicoes Gerais"}
+ano = st.sidebar.selectbox("Eleicao", list(_ANO_LABELS), format_func=lambda a: _ANO_LABELS[a], key="v2_ano")
 
-if not numero_input:
-    st.stop()
+_ufs_ordenadas = sorted(UF_NOME.items(), key=lambda kv: kv[1])
+_uf_opcoes = {f"{nome} - {sigla}": sigla for sigla, nome in _ufs_ordenadas}
+uf_label = st.sidebar.selectbox("UF", ["-- selecione --"] + list(_uf_opcoes.keys()), key="v2_uf")
+uf = _uf_opcoes.get(uf_label)
 
-if not numero_input.isdigit():
-    st.error("Informe apenas numeros.")
-    st.stop()
+municipio_codigo = None
+municipio_nome = None
+if uf and ano == 2024:
+    with st.spinner("Carregando municipios da UF..."):
+        municipios_df = _listar_municipios(ano, uf)
+    mun_opcoes = {
+        row.municipio: int(row.codigo_municipio_tse)
+        for row in municipios_df.itertuples(index=False)
+    }
+    mun_label = st.sidebar.selectbox("Municipio", ["-- selecione --"] + sorted(mun_opcoes), key="v2_municipio")
+    if mun_label != "-- selecione --":
+        municipio_codigo = mun_opcoes[mun_label]
+        municipio_nome = mun_label
 
-numero = int(numero_input)
-with st.spinner(
-    "Buscando candidaturas no registro nacional do TSE (pode levar ~15s na "
-    "primeira consulta)..."
-):
-    candidaturas = _buscar(numero)
+cargo = None
+_cargo_pronto = bool(uf) and (ano == 2022 or municipio_codigo is not None)
+if _cargo_pronto:
+    cargos = cargos_disponiveis(ano, uf=uf)
+    cargo_label = st.sidebar.selectbox("Cargo", ["-- selecione --"] + cargos, key="v2_cargo")
+    cargo = cargo_label if cargo_label != "-- selecione --" else None
 
-if not candidaturas:
-    st.warning(
-        f"Nenhuma candidatura encontrada para o numero {numero} nas Eleicoes "
-        "Municipais 2024. Verifique o numero."
+turno = 1
+if cargo:
+    escopo_provisorio = resolver_escopo(ano, cargo, uf=uf, municipio=(municipio_nome or uf), turno=1)
+    if escopo_provisorio.permite_segundo_turno:
+        turno = st.sidebar.radio("Turno", [1, 2], format_func=lambda t: f"{t}o turno", horizontal=True, key="v2_turno")
+
+candidatura_guiada = None
+if cargo:
+    with st.spinner("Buscando candidatos..."):
+        candidatos = _buscar_candidatos_guiado(ano, cargo, uf, municipio_codigo, turno)
+    if not candidatos:
+        st.sidebar.warning("Nenhum candidato encontrado para essa disputa.")
+    else:
+        busca = st.sidebar.text_input("Buscar (nome, numero ou partido)", key="v2_busca_candidato")
+        candidatos_filtrados = candidatos
+        if busca:
+            busca_low = busca.strip().lower()
+            candidatos_filtrados = [
+                c for c in candidatos
+                if busca_low in c.nome_urna.lower() or busca_low in c.nome_completo.lower()
+                or busca_low in str(c.numero) or busca_low in c.partido_sigla.lower()
+            ]
+        cand_opcoes = {
+            f"{c.nome_urna} - {c.numero} - {c.partido_sigla}": c
+            for c in sorted(candidatos_filtrados, key=lambda c: -c.total_votos)
+        }
+        if not cand_opcoes:
+            st.sidebar.warning("Nenhum candidato bate com a busca.")
+        else:
+            cand_label = st.sidebar.selectbox("Candidato", list(cand_opcoes.keys()), key="v2_candidato")
+            candidatura_guiada = cand_opcoes[cand_label]
+
+st.sidebar.divider()
+candidatura_fallback = None
+with st.sidebar.expander("Busca alternativa por numero (2024)"):
+    numero_input = st.text_input("Numero do candidato", placeholder="ex.: 15900", key="v2_numero_fallback")
+    if numero_input and numero_input.isdigit():
+        with st.spinner("Buscando candidaturas no registro nacional do TSE..."):
+            candidaturas_num = _buscar(int(numero_input))
+        if not candidaturas_num:
+            st.warning("Nenhuma candidatura encontrada nas Eleicoes Municipais 2024.")
+        else:
+            opcoes_num = {
+                f"{c.nome_urna} - {c.cargo} - {c.municipio}/{c.uf} - {c.partido_sigla} "
+                f"({c.total_votos} votos, {c.resultado_final})": c
+                for c in candidaturas_num
+            }
+            escolha_num = st.selectbox("Selecione a candidatura:", list(opcoes_num.keys()), key="v2_escolha_fallback")
+            candidatura_fallback = opcoes_num[escolha_num]
+
+alvo = candidatura_guiada or candidatura_fallback
+veio_do_fallback = alvo is candidatura_fallback and alvo is not None
+
+if alvo is None:
+    st.title("Sistema de Inteligencia Eleitoral")
+    st.caption(
+        "Dados oficiais TSE (consulta de candidatos + votacao por secao) e IBGE "
+        "(Censo Demografico 2022). Eleicoes Municipais 2024 (Prefeito/Vereador, "
+        "Brasil inteiro) e piloto de Eleicoes Gerais 2022 (Governador, SP)."
+    )
+    st.info(
+        "Selecione Eleicao -> UF -> [Municipio] -> Cargo -> Candidato na barra "
+        "lateral, ou use a busca alternativa por numero (2024)."
     )
     st.stop()
 
-st.success(f"{len(candidaturas)} candidatura(s) encontrada(s) para o numero {numero}.")
-opcoes = {
-    f"{c.nome_urna} - {c.cargo} - {c.municipio}/{c.uf} - {c.partido_sigla} "
-    f"({c.total_votos} votos, {c.resultado_final})": c
-    for c in candidaturas
-}
-escolha = st.selectbox("Selecione a candidatura correta:", list(opcoes.keys()))
-alvo = opcoes[escolha]
+st.sidebar.divider()
+st.sidebar.markdown(
+    f"**Resumo da selecao**\n\n"
+    f"- Eleicao: {alvo.ano_eleicao}\n"
+    f"- UF: {alvo.uf}\n"
+    f"- Municipio: {alvo.municipio if alvo.codigo_municipio_tse is not None else '(UF inteira)'}\n"
+    f"- Cargo: {alvo.cargo}\n"
+    f"- Turno: {alvo.turno}\n"
+    f"- Candidato: {alvo.nome_urna} ({alvo.numero}) - {alvo.partido_sigla}\n"
+    f"- Abrangencia: {'Municipal' if alvo.codigo_municipio_tse is not None else 'Estadual (piloto)'}"
+)
+if not st.sidebar.button("Gerar analise eleitoral", type="primary"):
+    st.title("Sistema de Inteligencia Eleitoral")
+    st.info("Confira o resumo da selecao na barra lateral e clique em **Gerar analise eleitoral**.")
+    st.stop()
 
 with st.spinner(
     "Carregando dados detalhados... Se esta e a primeira busca de um candidato "
@@ -301,9 +427,21 @@ with st.spinner(
     "oficial daquele estado agora (pode levar alguns minutos em estados "
     "grandes); buscas seguintes na mesma UF sao rapidas."
 ):
-    candidatura, vc, vd, rd = _carregar_dados_candidatura(
-        numero, alvo.codigo_municipio_tse, alvo.cargo, alvo.ano_eleicao, alvo.turno
-    )
+    if veio_do_fallback:
+        candidatura, vc, vd, rd = _carregar_dados_candidatura(
+            alvo.numero, alvo.codigo_municipio_tse, alvo.cargo, alvo.ano_eleicao, alvo.turno
+        )
+    else:
+        candidatura, vc, vd, rd = _carregar_dados_candidatura_v2(
+            ano, cargo, uf, municipio_codigo, turno, alvo.numero
+        )
+
+_escopo_atual = resolver_escopo(
+    candidatura.ano_eleicao, candidatura.cargo, uf=candidatura.uf,
+    municipio=(candidatura.municipio if candidatura.codigo_municipio_tse is not None else None),
+    turno=candidatura.turno,
+)
+_eh_municipal = _escopo_atual.tipo_abrangencia == "MUNICIPAL"
 
 rg = resultado_geral(candidatura, vd, rd)
 ranking = ranking_disputa(vd, rd)
@@ -346,11 +484,20 @@ st.markdown(
 )
 
 # --------------------------------------------------------------- Navegacao
-secao = st.sidebar.radio(
-    "Navegacao",
-    ["Visao Geral", "Concorrencia", "Territorio", "Geografia", "Demografia",
-     "Estatistica Avancada", "Abordagem de Maslow", "Relatorio"],
-)
+_opcoes_secao = ["Visao Geral", "Concorrencia", "Territorio"]
+if _eh_municipal:
+    _opcoes_secao += ["Geografia", "Demografia", "Estatistica Avancada", "Abordagem de Maslow"]
+else:
+    _opcoes_secao += ["Indicadores Estaduais"]
+_opcoes_secao += ["Relatorio"]
+secao = st.sidebar.radio("Navegacao", _opcoes_secao)
+if not _eh_municipal:
+    st.sidebar.caption(
+        "Piloto de cargo estadual: Geografia/Demografia/Estatistica Avancada/"
+        "Maslow dependem da malha de setores censitarios de UM municipio e "
+        "ficam fora deste piloto (seriam necessarios os ~645 municipios da "
+        "UF de uma vez)."
+    )
 
 # ============================================================ Visao Geral
 if secao == "Visao Geral":
@@ -441,12 +588,19 @@ elif secao == "Concorrencia":
 
 # ============================================================== Territorio
 elif secao == "Territorio":
-    nivel_label = st.radio(
-        "Nivel territorial", ["Zona eleitoral", "Secao eleitoral"], horizontal=True,
-        index=0 if st.session_state["nivel_territorial"] == "NR_ZONA" else 1,
-    )
-    st.session_state["nivel_territorial"] = "NR_ZONA" if nivel_label == "Zona eleitoral" else "NR_SECAO_COMPOSTA"
-    nivel = st.session_state["nivel_territorial"]
+    if _eh_municipal:
+        nivel_label = st.radio(
+            "Nivel territorial", ["Zona eleitoral", "Secao eleitoral"], horizontal=True,
+            index=0 if st.session_state["nivel_territorial"] == "NR_ZONA" else 1,
+        )
+        st.session_state["nivel_territorial"] = "NR_ZONA" if nivel_label == "Zona eleitoral" else "NR_SECAO_COMPOSTA"
+        nivel = st.session_state["nivel_territorial"]
+    else:
+        st.caption(
+            "Cargo estadual (piloto): nivel territorial fixo em Municipio "
+            "(a UF inteira, nao zona/secao)."
+        )
+        nivel = "CD_MUNICIPIO"
 
     terr = desempenho_territorial(candidatura, vc, vd, rd, nivel)
     terr = enriquecer_com_comparecimento_abstencao(terr, candidatura, nivel)
@@ -487,6 +641,60 @@ elif secao == "Territorio":
         delta = delta_vs_rivais(matriz, nivel, candidatura.nome_urna)
         st.plotly_chart(charts.grafico_delta_rivais(delta, nivel), use_container_width=True)
         st.plotly_chart(charts.grafico_comparativo_concorrentes(matriz, nivel), use_container_width=True)
+
+# ================================================= Indicadores Estaduais (V2)
+elif secao == "Indicadores Estaduais":
+    _explicacao(
+        "Indicadores de dispersao geografica do voto entre os municipios da "
+        f"UF {candidatura.uf} inteira - complementam (nao substituem) o "
+        "Territorio acima. Piloto: Governador 2022/SP - ver limitacoes "
+        "metodologicas em config/indicators.yaml: indice_capilaridade."
+    )
+    terr_mun = desempenho_territorial(candidatura, vc, vd, rd, "CD_MUNICIPIO")
+    terr_mun = terr_mun.merge(
+        vd[["CD_MUNICIPIO", "NM_MUNICIPIO"]].drop_duplicates(), on="CD_MUNICIPIO", how="left"
+    )
+    presenca = calcular_presenca_eleitoral(terr_mun, vd)
+    concentracao = calcular_concentracao_territorial(terr_mun)
+    indice_capilaridade, classif_capilaridade = calcular_indice_capilaridade(presenca, concentracao)
+
+    c1, c2, c3, c4 = st.columns(4)
+    _kpi(c1, "Cobertura municipal", f"{presenca.pct_cobertura}%",
+         f"{presenca.n_municipios_com_votos}/{presenca.n_municipios_universo} municipios")
+    _kpi(c2, "Indice de capilaridade", f"{indice_capilaridade}/100", classif_capilaridade)
+    _kpi(c3, "Concentracao (HHI)", f"{concentracao.hhi:.4f}")
+    _kpi(c4, "Gini territorial", f"{concentracao.gini:.4f}")
+
+    with st.container(border=True):
+        st.subheader("Presenca eleitoral")
+        c5, c6, c7 = st.columns(3)
+        _kpi(c5, "Maior votacao absoluta", presenca.municipio_maior_votacao_absoluta,
+             f"{_fmt(presenca.votos_municipio_maior_votacao_absoluta)} votos")
+        _kpi(c6, "Participacao dos 5 maiores", f"{presenca.participacao_top5_pct}%")
+        _kpi(c7, "Participacao dos 10/20 maiores",
+             f"{presenca.participacao_top10_pct}% / {presenca.participacao_top20_pct}%")
+        if presenca.municipios_sem_votos:
+            st.caption(
+                f"{len(presenca.municipios_sem_votos)} municipio(s) sem nenhum voto "
+                f"registrado nesta disputa: {', '.join(presenca.municipios_sem_votos[:15])}"
+                + (" ..." if len(presenca.municipios_sem_votos) > 15 else "")
+            )
+
+    with st.container(border=True):
+        st.subheader("Concentracao territorial")
+        c8, c9 = st.columns(2)
+        _kpi(c8, "Dependencia do maior municipio", f"{concentracao.dependencia_maior_municipio_pct}%")
+        _kpi(c9, "Dependencia dos 5/10 maiores",
+             f"{concentracao.dependencia_top5_pct}% / {concentracao.dependencia_top10_pct}%")
+        st.plotly_chart(charts.grafico_curva_lorenz(concentracao.curva_lorenz), use_container_width=True)
+
+    with st.container(border=True):
+        st.subheader(f"Ranking de municipios ({candidatura.uf})")
+        st.dataframe(
+            terr_mun[["NM_MUNICIPIO", "votos_candidato", "pct_votos_validos_territorio", "colocacao"]]
+            .sort_values("votos_candidato", ascending=False),
+            use_container_width=True, height=400,
+        )
 
 # =============================================================== Geografia
 elif secao == "Geografia":
@@ -794,6 +1002,13 @@ elif secao == "Abordagem de Maslow":
                 st.dataframe(resultado_maslow.variaveis_sem_correspondencia, use_container_width=True)
 
 # ================================================================ Relatorio
+elif secao == "Relatorio" and not _eh_municipal:
+    st.info(
+        "Relatorio executivo (HTML/PDF/Excel) disponivel apenas para cargos "
+        "municipais nesta versao piloto - os indicadores estaduais podem ser "
+        "conferidos na aba 'Indicadores Estaduais'."
+    )
+
 elif secao == "Relatorio":
     st.write("Gere o relatorio executivo ou exporte os dados desta candidatura.")
     nivel_relatorio = st.session_state.get("nivel_territorial", "NR_ZONA")

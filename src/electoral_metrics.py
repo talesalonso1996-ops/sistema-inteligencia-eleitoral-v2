@@ -40,7 +40,7 @@ class ResultadoGeral:
     pct_partido_sobre_validos: float
     pct_candidato_sobre_partido: float
     total_eleitos: int
-    fonte: str = "TSE - votacao_secao_2024 + consulta_cand_2024 (2024, SP)"
+    fonte: str = "TSE - votacao_secao + consulta_cand"
 
 
 def resultado_geral(
@@ -157,10 +157,15 @@ def desempenho_territorial(
     nivel: str,
 ) -> pd.DataFrame:
     """Desempenho do candidato por territorio (secao 5.2). `nivel` deve ser
-    uma coluna presente no dataframe: 'NR_ZONA', 'NR_LOCAL_VOTACAO' ou
-    'NR_SECAO'. Municipio nao se aplica aqui pois a candidatura ja e de um
-    unico municipio (o municipio E o nivel superior, calculado em
-    resultado_geral)."""
+    uma coluna presente no dataframe: 'NR_ZONA', 'NR_LOCAL_VOTACAO',
+    'NR_SECAO' (cargos municipais - a candidatura ja e de um unico
+    municipio, o municipio E o nivel superior, calculado em
+    resultado_geral) - ou 'CD_MUNICIPIO' (V2, cargos estaduais/distritais:
+    votos_candidatura/votos_disputa vem de
+    candidate_finder.votos_da_candidatura_generalizado/
+    votos_da_disputa_generalizado, que cobrem o estado/DF inteiro e ja
+    trazem CD_MUNICIPIO - nenhuma mudanca de logica foi necessaria aqui,
+    a funcao ja agrupava por qualquer coluna informada em `nivel`)."""
     validos = _votos_validos(votos_disputa)
     nominais = _votos_nominais(votos_disputa, registro_disputa)
 

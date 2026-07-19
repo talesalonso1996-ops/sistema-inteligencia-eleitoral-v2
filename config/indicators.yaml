@@ -25,6 +25,35 @@ indice_performance:
     e podem ser recalibrados neste arquivo. Nao ha validacao externa (pesquisa
     de opiniao) associada ao indice.
 
+# Indice de Capilaridade Eleitoral (0-100) - V2, cargos de abrangencia
+# estadual/distrital (Governador, Senador, Deputado Federal/Estadual/
+# Distrital). Mede dispersao geografica do voto entre os municipios da UF
+# (cobertura + baixa concentracao) - ver src/state_scope_indicators.py.
+# Mesma logica de pesos configuraveis/redistribuiveis do indice_performance
+# acima (nao reinventa o padrao).
+indice_capilaridade:
+  pesos:
+    cobertura_municipios: 0.40       # % de municipios da UF onde o candidato teve voto
+    baixa_concentracao_hhi: 0.35     # inverso do HHI (quanto menos concentrado, maior o componente)
+    baixa_dependencia_top5: 0.25     # inverso da dependencia dos 5 maiores municipios
+
+  limites_classificacao:
+    ampla: 80
+    consolidada: 60
+    moderada: 40
+    restrita: 20
+    pontual: 0
+
+  limitacoes_metodologicas: >
+    Indice mede APENAS dispersao geografica do voto entre os municipios da
+    UF (cobertura, concentracao HHI, dependencia dos maiores redutos) - NAO
+    inclui uma dimensao de "distribuicao entre regioes/mesorregioes do
+    estado" por falta de um mapeamento oficial de mesorregiao por
+    municipio integrado e verificado nesta base (gap documentado, nao
+    preenchido com dado nao conferido). O universo de "municipios da UF" e
+    aproximado pelos municipios com pelo menos 1 voto na disputa completa
+    (ver docstring de src/state_scope_indicators.py).
+
 clustering:
   algoritmo_padrao: "kmeans"
   k_min: 2

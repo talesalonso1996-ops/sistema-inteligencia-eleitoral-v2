@@ -22,6 +22,62 @@
 #    src/uf_data_bootstrap.py) - pre-processar as 27 UFs de uma vez nao
 #    caberia no ambiente gratuito de deploy.
 
+
+# Metadados por ANO ELEITORAL, consumidos por src/rules/electoral_scope.py -
+# unica fonte de verdade sobre os valores brutos do TSE (DS_ELEICAO por tipo
+# de abrangencia, TP_ABRANGENCIA por tipo de abrangencia) e os templates de
+# URL/nome de arquivo de cada ano, para nao espalhar esses literais pelo
+# codigo. TODOS os valores abaixo (2024 e 2022) foram VERIFICADOS contra um
+# arquivo real baixado do TSE (consulta_cand_2022_BRASIL.csv, inspecionado
+# via DuckDB em 2026-07-19 - ver GROUP BY DS_ELEICAO/TP_ABRANGENCIA/DS_CARGO)
+# - nenhum valor foi assumido sem essa conferencia (regra do projeto).
+eleicoes:
+  2024:
+    tipo: "Eleicoes Municipais"
+    turno_unico_padrao: false
+    ds_eleicao_ilike_por_abrangencia:
+      MUNICIPAL: "%Eleições Municipais%"
+    tp_abrangencia_por_cargo:
+      MUNICIPAL: "MUNICIPAL"
+    votacao_secao_url: "https://cdn.tse.jus.br/estatistica/sead/odsele/votacao_secao/votacao_secao_2024_{uf}.zip"
+    votacao_secao_arquivo: "votacao_secao_2024_{UF}.parquet"
+    consulta_cand_url: "https://cdn.tse.jus.br/estatistica/sead/odsele/consulta_cand/consulta_cand_2024.zip"
+    verificado: true
+
+  2022:
+    tipo: "Eleicoes Gerais"
+    turno_unico_padrao: false
+    # IMPORTANTE: nao existe um unico "Eleições Gerais 2022" no TSE - sao 2
+    # DS_ELEICAO DIFERENTES conforme a abrangencia (confirmado por inspecao
+    # real de consulta_cand_2022_BRASIL.csv):
+    #   - Presidente/Vice: DS_ELEICAO = "Eleição Geral Federal 2022" (singular "Geral")
+    #   - Governador/Vice/Senador/Suplentes/Dep. Federal/Dep. Estadual/
+    #     Dep. Distrital: DS_ELEICAO = "Eleições Gerais Estaduais 2022"
+    # Um unico padrao "%Eleições Gerais%" NAO cobre o caso Federal (nao
+    # contem a palavra "Gerais") - por isso o filtro e chaveado por
+    # tipo_abrangencia, nao um valor unico por ano.
+    ds_eleicao_ilike_por_abrangencia:
+      NACIONAL: "%Eleição Geral Federal 2022%"
+      ESTADUAL: "%Eleições Gerais Estaduais 2022%"
+      DISTRITAL: "%Eleições Gerais Estaduais 2022%"
+    tp_abrangencia_por_cargo:
+      NACIONAL: "FEDERAL"
+      ESTADUAL: "ESTADUAL"
+      DISTRITAL: "ESTADUAL"  # TSE trata o DF como mais uma UF (SG_UF='DF'), nao um TP_ABRANGENCIA proprio
+    votacao_secao_url: "https://cdn.tse.jus.br/estatistica/sead/odsele/votacao_secao/votacao_secao_2022_{uf}.zip"
+    votacao_secao_arquivo: "votacao_secao_2022_{UF}.parquet"
+    consulta_cand_url: "https://cdn.tse.jus.br/estatistica/sead/odsele/consulta_cand/consulta_cand_2022.zip"
+    verificado: true
+    observacao: >
+      Para cargos ESTADUAIS/DISTRITAIS, SG_UE em consulta_cand e a propria
+      sigla da UF (ex.: "SP"), NAO um codigo numerico de municipio -
+      TRY_CAST(SG_UE AS INTEGER) resultaria em NULL. Por isso
+      candidate_finder.buscar_candidatos_disputa() filtra por SG_UF
+      diretamente para esses cargos, nunca por SG_UE/codigo_municipio_tse
+      (que fica None). Presidente e registrado uma unica vez nacionalmente
+      com SG_UF='BR', SG_UE='BR', NM_UE='BRASIL' (confirmado na inspecao) -
+      nao ha 27 linhas por UF para essa candidatura.
+
 tse:
   consulta_candidatos:
     descricao: "Registro oficial de candidaturas: partido, coligacao/federacao, situacao da candidatura, resultado final por turno - Brasil inteiro"

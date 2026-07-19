@@ -18,7 +18,16 @@ numero do candidato; o sistema cruza duas fontes oficiais do TSE via DuckDB:
 Quando mais de uma candidatura e encontrada (mesmo numero em municipios,
 cargos, UFs ou turnos diferentes), a decisao de qual usar cabe ao usuario -
 este modulo apenas retorna as opcoes, nunca escolhe sozinho.
-"""
+
+V2: as funcoes acima (Candidatura, buscar_candidaturas, votos_da_candidatura,
+votos_da_disputa, registro_candidatos_disputa) permanecem EXATAMENTE como no
+V1 - continuam cobrindo so a busca ampla por numero para cargos municipais
+(2024), preservadas sem nenhuma mudanca de logica para nao arriscar
+regressao. No final do arquivo foram ADICIONADAS funcoes generalizadas
+(sufixo `_generalizado`/`buscar_candidatos_disputa`) que cobrem tambem
+cargos estaduais/distritais (2022) via o novo fluxo guiado em cascata -
+essas usam `src/rules/electoral_scope.py` como unica fonte de verdade sobre
+abrangencia, em vez de literais SQL espalhados."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,6 +35,7 @@ from dataclasses import dataclass
 import duckdb
 import pandas as pd
 
+from .rules.electoral_scope import resolver_escopo
 from .uf_data_bootstrap import caminho_votacao_secao, garantir_dados_uf
 from .utils import cache_key, data_sources, get_logger, read_cache, resolve_path, write_cache
 
@@ -61,7 +71,7 @@ class Candidatura:
     nome_urna: str
     cargo: str
     municipio: str
-    codigo_municipio_tse: int
+    codigo_municipio_tse: int | None
     uf: str
     ano_eleicao: int
     turno: int
@@ -372,4 +382,285 @@ def registro_candidatos_disputa(candidatura: Candidatura) -> pd.DataFrame:
     # o mesmo numero (a anulada + a substituta), duplicando a linha desse
     # candidato em ranking_disputa/ranking_partidos (merge how="left" contra
     # este registro) - caso real verificado: Pitangueiras/SP, numero 30000.
+    return con.execute(sql).fetchdf()
+
+
+# ---------------------------------------------------------------------------
+# V2 - funcoes generalizadas (cargos estaduais/distritais + fluxo guiado).
+# Nada acima desta linha foi alterado em relacao ao V1.
+# ---------------------------------------------------------------------------
+
+
+def _fonte_consulta_candidatos_ano(ano_eleicao: int) -> str:
+    """Caminho do arquivo consulta_cand do ano informado. Para 2024, usa o
+    arquivo_local ja configurado (identico ao V1); anos futuros seguem a
+    mesma convencao de nome ja usada para 2024
+    (data/raw/consulta_cand_{ano}_BR.parquet)."""
+    if ano_eleicao == 2024:
+        return _fonte("consulta_candidatos")["arquivo_local"]
+    return f"data/raw/consulta_cand_{ano_eleicao}_BR.parquet"
+
+
+def _scan_parquet(caminho: str) -> str:
+    if not (len(caminho) > 1 and caminho[1] == ":"):
+        caminho = str(resolve_path(caminho))
+    return f"read_parquet('{caminho.replace(chr(92), '/')}')"
+
+
+def buscar_candidatos_disputa(
+    ano_eleicao: int,
+    cargo: str,
+    uf: str,
+    municipio_codigo: int | None = None,
+    turno: int = 1,
+    numero: int | None = None,
+) -> list[Candidatura]:
+    """Busca candidatos de uma disputa JA CONHECIDA (ano/cargo/UF e, quando
+    municipal, municipio) - usada pelo novo fluxo guiado em cascata
+    (Eleicao->UF->[Municipio]->Cargo->Candidato), ao contrario de
+    `buscar_candidaturas` (busca ampla por numero, so cargos municipais).
+
+    Cobre tambem cargos estaduais/distritais (municipio_codigo=None agrega
+    o estado/DF inteiro - vota-se e apura-se em todos os municipios da UF).
+    Usa `resolver_escopo` (src/rules/electoral_scope.py) como unica fonte de
+    verdade sobre abrangencia - nenhum literal de TP_ABRANGENCIA/DS_ELEICAO
+    e escrito aqui."""
+    escopo = resolver_escopo(
+        ano_eleicao, cargo, uf=uf,
+        municipio=(str(municipio_codigo) if municipio_codigo is not None else None),
+        turno=turno,
+    )
+
+    con = _conexao()
+    filtros = [
+        f"DS_CARGO ILIKE '{escopo.cargo}'",
+        f"ANO_ELEICAO = {ano_eleicao}",
+        f"NR_TURNO = {turno}",
+        "DS_SIT_TOT_TURNO != '#NULO'",
+        f"DS_ELEICAO ILIKE '{escopo.filtro_sql_ds_eleicao}'",
+    ]
+    if escopo.filtro_sql_tp_abrangencia:
+        filtros.append(f"TP_ABRANGENCIA = '{escopo.filtro_sql_tp_abrangencia}'")
+    if escopo.tipo_abrangencia == "MUNICIPAL":
+        if municipio_codigo is None:
+            raise ValueError(f"{escopo.cargo} exige municipio_codigo")
+        filtros.append(f"TRY_CAST(SG_UE AS INTEGER) = {int(municipio_codigo)}")
+    else:
+        filtros.append(f"SG_UF = '{uf.upper()}'")
+    if numero is not None:
+        filtros.append(f"NR_CANDIDATO = {int(numero)}")
+
+    sql = f"""
+        SELECT
+            NR_CANDIDATO AS numero,
+            NM_CANDIDATO AS nome_completo,
+            NM_URNA_CANDIDATO AS nome_urna,
+            DS_CARGO AS cargo,
+            NM_UE AS municipio,
+            TRY_CAST(SG_UE AS INTEGER) AS codigo_municipio_tse_bruto,
+            SG_UF AS uf,
+            ANO_ELEICAO AS ano_eleicao,
+            NR_TURNO AS turno,
+            SG_PARTIDO AS partido_sigla,
+            NM_PARTIDO AS partido_nome,
+            COALESCE(NULLIF(NM_COLIGACAO, '#NULO'), NM_FEDERACAO, '') AS coligacao_federacao,
+            DS_SITUACAO_CANDIDATURA AS situacao_candidatura,
+            DS_SIT_TOT_TURNO AS resultado_final
+        FROM {_scan_parquet(_fonte_consulta_candidatos_ano(ano_eleicao))}
+        WHERE {" AND ".join(filtros)}
+    """
+    logger.info(
+        "Consultando candidatos da disputa: ano=%s cargo=%s uf=%s municipio=%s turno=%s",
+        ano_eleicao, escopo.cargo, uf, municipio_codigo, turno,
+    )
+    registro = con.execute(sql).fetchdf()
+    if registro.empty:
+        return []
+
+    ok = garantir_dados_uf(uf, ano_eleicao)
+    if not ok:
+        logger.warning("Dados de votacao_secao indisponiveis para UF=%s ano=%s", uf, ano_eleicao)
+        registro["total_votos"] = 0
+        registro["zonas_com_votos"] = 0
+        votos = registro[["numero"]].assign(total_votos=0, zonas_com_votos=0)
+    else:
+        con2 = _conexao()
+        filtros_votos = [
+            f"DS_CARGO ILIKE '{escopo.cargo}'",
+            f"ANO_ELEICAO = {ano_eleicao}",
+            f"NR_TURNO = {turno}",
+        ]
+        if escopo.tipo_abrangencia == "MUNICIPAL":
+            filtros_votos.append(f"CD_MUNICIPIO = {int(municipio_codigo)}")
+        sql_votos = f"""
+            SELECT
+                NR_VOTAVEL AS numero,
+                SUM(QT_VOTOS) AS total_votos,
+                COUNT(DISTINCT NR_ZONA) AS zonas_com_votos
+            FROM read_parquet('{caminho_votacao_secao(uf, ano_eleicao).as_posix()}')
+            WHERE {" AND ".join(filtros_votos)}
+            GROUP BY 1
+        """
+        votos = con2.execute(sql_votos).fetchdf()
+
+    df = registro.merge(votos, on="numero", how="left", suffixes=("", "_y"))
+    if "total_votos_y" in df.columns:
+        df["total_votos"] = df["total_votos_y"]
+        df["zonas_com_votos"] = df["zonas_com_votos_y"]
+    df["total_votos"] = df["total_votos"].fillna(0).astype(int)
+    df["zonas_com_votos"] = df["zonas_com_votos"].fillna(0).astype(int)
+    df = df.sort_values("total_votos", ascending=False)
+
+    resultado = []
+    for row in df.itertuples(index=False):
+        bruto = getattr(row, "codigo_municipio_tse_bruto", None)
+        codigo_mun = int(bruto) if (escopo.tipo_abrangencia == "MUNICIPAL" and pd.notna(bruto)) else None
+        resultado.append(
+            Candidatura(
+                numero=int(row.numero),
+                nome_completo=str(row.nome_completo).strip(),
+                nome_urna=str(row.nome_urna).strip(),
+                cargo=str(row.cargo).strip(),
+                municipio=str(row.municipio).strip(),
+                codigo_municipio_tse=codigo_mun,
+                uf=str(row.uf).strip(),
+                ano_eleicao=int(row.ano_eleicao),
+                turno=int(row.turno),
+                partido_sigla=str(row.partido_sigla).strip(),
+                partido_nome=str(row.partido_nome).strip(),
+                coligacao_federacao=str(row.coligacao_federacao).strip(),
+                situacao_candidatura=str(row.situacao_candidatura).strip(),
+                resultado_final=str(row.resultado_final).strip(),
+                total_votos=int(row.total_votos),
+                zonas_com_votos=int(row.zonas_com_votos),
+            )
+        )
+    return resultado
+
+
+def votos_da_candidatura_generalizado(candidatura: Candidatura) -> pd.DataFrame:
+    """Equivalente generalizado de votos_da_candidatura: identico para
+    cargos municipais; para estaduais/distritais (codigo_municipio_tse is
+    None) agrega o estado/DF inteiro, sem filtro de CD_MUNICIPIO."""
+    key = cache_key(
+        "votos_candidatura_escopo_v1", candidatura.uf, candidatura.numero,
+        candidatura.codigo_municipio_tse, candidatura.cargo,
+        candidatura.ano_eleicao, candidatura.turno,
+    )
+    cached = read_cache("candidate_finder", key)
+    if cached is not None:
+        return cached
+
+    garantir_dados_uf(candidatura.uf, candidatura.ano_eleicao)
+    con = _conexao()
+    filtros = [
+        f"NR_VOTAVEL = {candidatura.numero}",
+        f"DS_CARGO ILIKE '{candidatura.cargo}'",
+        f"ANO_ELEICAO = {candidatura.ano_eleicao}",
+        f"NR_TURNO = {candidatura.turno}",
+    ]
+    if candidatura.codigo_municipio_tse is not None:
+        filtros.append(f"CD_MUNICIPIO = {candidatura.codigo_municipio_tse}")
+    sql = f"""
+        SELECT {_COLUNAS_VOTACAO}
+        FROM read_parquet('{caminho_votacao_secao(candidatura.uf, candidatura.ano_eleicao).as_posix()}')
+        WHERE {" AND ".join(filtros)}
+    """
+    df = con.execute(sql).fetchdf()
+    write_cache("candidate_finder", key, df)
+    return df
+
+
+def votos_da_disputa_generalizado(candidatura: Candidatura) -> pd.DataFrame:
+    """Equivalente generalizado de votos_da_disputa: identico para cargos
+    municipais; para estaduais/distritais agrega o estado/DF inteiro (sem
+    filtro de CD_MUNICIPIO) - a base para ranking_disputa/ranking_partidos
+    passa a cobrir todos os municipios da UF."""
+    key = cache_key(
+        "votos_disputa_escopo_v1", candidatura.uf, candidatura.codigo_municipio_tse,
+        candidatura.cargo, candidatura.ano_eleicao, candidatura.turno,
+    )
+    cached = read_cache("candidate_finder", key)
+    if cached is not None:
+        return cached
+
+    garantir_dados_uf(candidatura.uf, candidatura.ano_eleicao)
+    con = _conexao()
+    filtros = [
+        f"DS_CARGO ILIKE '{candidatura.cargo}'",
+        f"ANO_ELEICAO = {candidatura.ano_eleicao}",
+        f"NR_TURNO = {candidatura.turno}",
+    ]
+    if candidatura.codigo_municipio_tse is not None:
+        filtros.append(f"CD_MUNICIPIO = {candidatura.codigo_municipio_tse}")
+    sql = f"""
+        SELECT {_COLUNAS_VOTACAO}
+        FROM read_parquet('{caminho_votacao_secao(candidatura.uf, candidatura.ano_eleicao).as_posix()}')
+        WHERE {" AND ".join(filtros)}
+    """
+    logger.info(
+        "Consultando disputa completa (generalizado): uf=%s cargo=%s ano=%s turno=%s municipio=%s",
+        candidatura.uf, candidatura.cargo, candidatura.ano_eleicao, candidatura.turno,
+        candidatura.codigo_municipio_tse,
+    )
+    df = con.execute(sql).fetchdf()
+    write_cache("candidate_finder", key, df)
+    return df
+
+
+def registro_candidatos_disputa_generalizado(candidatura: Candidatura) -> pd.DataFrame:
+    """Equivalente generalizado de registro_candidatos_disputa: filtra por
+    municipio (SG_UE) quando a candidatura e municipal, ou por UF (SG_UF)
+    quando e estadual/distrital - o registro de um candidato a Governador/
+    Senador/Dep. Federal/Estadual nao tem um municipio unico associado."""
+    con = _conexao()
+    escopo = resolver_escopo(
+        candidatura.ano_eleicao, candidatura.cargo, uf=candidatura.uf,
+        municipio=candidatura.municipio, turno=candidatura.turno,
+    )
+    filtros = [
+        f"DS_CARGO = '{candidatura.cargo}'",
+        f"ANO_ELEICAO = {candidatura.ano_eleicao}",
+        f"NR_TURNO = {candidatura.turno}",
+        "DS_SIT_TOT_TURNO != '#NULO'",
+        f"DS_ELEICAO ILIKE '{escopo.filtro_sql_ds_eleicao}'",
+    ]
+    if escopo.filtro_sql_tp_abrangencia:
+        filtros.append(f"TP_ABRANGENCIA = '{escopo.filtro_sql_tp_abrangencia}'")
+    if candidatura.codigo_municipio_tse is not None:
+        filtros.append(f"TRY_CAST(SG_UE AS INTEGER) = {candidatura.codigo_municipio_tse}")
+    else:
+        filtros.append(f"SG_UF = '{candidatura.uf.upper()}'")
+
+    sql = f"""
+        SELECT
+            NR_CANDIDATO AS numero,
+            NM_CANDIDATO AS nome_completo,
+            NM_URNA_CANDIDATO AS nome_urna,
+            NR_PARTIDO AS numero_partido,
+            SG_PARTIDO AS partido_sigla,
+            NM_PARTIDO AS partido_nome,
+            COALESCE(NULLIF(NM_COLIGACAO, '#NULO'), NM_FEDERACAO, '') AS coligacao_federacao,
+            DS_SITUACAO_CANDIDATURA AS situacao_candidatura,
+            DS_SIT_TOT_TURNO AS resultado_final
+        FROM {_scan_parquet(_fonte_consulta_candidatos_ano(candidatura.ano_eleicao))}
+        WHERE {" AND ".join(filtros)}
+    """
+    return con.execute(sql).fetchdf()
+
+
+def listar_municipios_uf(ano_eleicao: int, uf: str) -> pd.DataFrame:
+    """Lista (codigo, nome) dos municipios da UF com candidaturas municipais
+    registradas no ano informado - usada pelo fluxo guiado em cascata
+    (Eleicao->UF->Municipio->Cargo->Candidato) para popular o seletor de
+    municipio. So faz sentido para anos/cargos de abrangencia MUNICIPAL
+    (2024 Prefeito/Vereador) - cargos estaduais/nacionais nao tem um
+    municipio para selecionar (o proprio fluxo guiado pula essa etapa)."""
+    con = _conexao()
+    sql = f"""
+        SELECT DISTINCT TRY_CAST(SG_UE AS INTEGER) AS codigo_municipio_tse, NM_UE AS municipio
+        FROM {_scan_parquet(_fonte_consulta_candidatos_ano(ano_eleicao))}
+        WHERE SG_UF = '{uf.upper()}' AND TRY_CAST(SG_UE AS INTEGER) IS NOT NULL
+        ORDER BY 2
+    """
     return con.execute(sql).fetchdf()

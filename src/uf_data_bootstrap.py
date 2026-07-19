@@ -10,6 +10,12 @@ Por isso cada UF so e baixada/convertida (direto da fonte oficial: TSE cdn
 efetivamente buscado, e o resultado fica salvo em data/raw/ (arquivo
 parquet reduzido) para as buscas seguintes - nesta sessao do container e,
 em ambiente local, permanentemente.
+
+O ano eleitoral (`ano`) e parametrizado (default 2024, para preservar
+identico o comportamento/caminhos ja usados por todo chamador existente) -
+os templates de URL/nome de arquivo por ano vem de
+`config/data_sources.yaml: eleicoes.<ano>` (ver src/rules/electoral_scope.py),
+nunca de um literal "2024" espalhado pelo codigo.
 """
 from __future__ import annotations
 
@@ -22,14 +28,10 @@ import geopandas as gpd
 import requests
 import streamlit as st
 
-from .utils import get_logger, resolve_path
+from .utils import data_sources, get_logger, resolve_path
 
 logger = get_logger(__name__)
 
-_TSE_VOTACAO_URL = (
-    "https://cdn.tse.jus.br/estatistica/sead/odsele/votacao_secao/"
-    "votacao_secao_2024_{uf}.zip"
-)
 _IBGE_MALHA_URL = (
     "https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/"
     "malhas_de_setores_censitarios__divisoes_intramunicipais/censo_2022/"
@@ -40,8 +42,16 @@ _COLUNAS_SETORES = ["CD_SETOR", "CD_MUN", "NM_MUN", "NM_DIST", "CD_BAIRRO", "geo
 _COLUNAS_BAIRROS = ["CD_MUN", "NM_MUN", "NM_BAIRRO", "geometry"]
 
 
-def caminho_votacao_secao(uf: str) -> Path:
-    return resolve_path("data/raw") / f"votacao_secao_2024_{uf.upper()}.parquet"
+def _eleicao_cfg(ano: int) -> dict:
+    eleicoes = data_sources().get("eleicoes", {})
+    if ano not in eleicoes:
+        raise ValueError(f"Ano eleitoral nao configurado em config/data_sources.yaml: eleicoes.{ano}")
+    return eleicoes[ano]
+
+
+def caminho_votacao_secao(uf: str, ano: int = 2024) -> Path:
+    nome = _eleicao_cfg(ano)["votacao_secao_arquivo"].format(UF=uf.upper())
+    return resolve_path("data/raw") / nome
 
 
 def caminho_malha(tipo: str, uf: str) -> Path:
@@ -60,17 +70,17 @@ def _baixar(url: str) -> bytes:
     return resp.content
 
 
-def _garantir_votacao_secao_uf(uf: str) -> bool:
-    destino = caminho_votacao_secao(uf)
+def _garantir_votacao_secao_uf(uf: str, ano: int = 2024) -> bool:
+    destino = caminho_votacao_secao(uf, ano)
     if destino.exists():
         return True
 
-    url = _TSE_VOTACAO_URL.format(uf=uf.upper())
-    logger.info("Baixando votacao_secao da UF %s: %s", uf, url)
+    url = _eleicao_cfg(ano)["votacao_secao_url"].format(uf=uf.upper())
+    logger.info("Baixando votacao_secao %s da UF %s: %s", ano, uf, url)
     try:
         conteudo = _baixar(url)
     except Exception:
-        logger.exception("Falha ao baixar votacao_secao para UF %s", uf)
+        logger.exception("Falha ao baixar votacao_secao %s para UF %s", ano, uf)
         return False
 
     pasta_tmp = _pasta_tmp()
@@ -106,10 +116,10 @@ def _garantir_votacao_secao_uf(uf: str) -> bool:
             ) TO '{tmp_out.as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)
         """)
         tmp_out.rename(destino)
-        logger.info("votacao_secao da UF %s convertida: %s", uf, destino)
+        logger.info("votacao_secao %s da UF %s convertida: %s", ano, uf, destino)
         return True
     except Exception:
-        logger.exception("Falha ao converter votacao_secao da UF %s", uf)
+        logger.exception("Falha ao converter votacao_secao %s da UF %s", ano, uf)
         return False
     finally:
         if nome_csv:
@@ -149,19 +159,22 @@ def _garantir_malha_tipo_uf(tipo: str, uf: str) -> bool:
 
 
 @st.cache_resource(show_spinner=False)
-def garantir_dados_uf(uf: str) -> bool:
-    """Garante votacao_secao da UF em data/raw/, baixando e convertendo sob
-    demanda (TSE cdn) na primeira busca daquele estado. Cacheado por UF
-    (`st.cache_resource` chaveia pelo argumento) - nao repete o download na
-    mesma sessao do container.
+def garantir_dados_uf(uf: str, ano: int = 2024) -> bool:
+    """Garante votacao_secao da UF (do ano eleitoral informado) em
+    data/raw/, baixando e convertendo sob demanda (TSE cdn) na primeira
+    busca daquele estado/ano. Cacheado por (UF, ano) - `st.cache_resource`
+    chaveia pelos argumentos - nao repete o download na mesma sessao do
+    container. Default `ano=2024` preserva o comportamento/assinatura ja
+    usado por todo chamador existente do V1.
 
     NAO baixa a malha geografica (setores/bairros) aqui - um numero de
     candidato pode aparecer em varias UFs no registro nacional
     (consulta_cand) so para descobrir o total de votos de cada uma, e a
-    malha (bem mais pesada) so e realmente necessaria depois que o usuario
-    ESCOLHE uma candidatura especifica para analisar (ver
+    malha (bem mais pesada, e a mesma para qualquer ano eleitoral - Censo
+    2022 nao muda por ano de eleicao) so e realmente necessaria depois que
+    o usuario ESCOLHE uma candidatura especifica para analisar (ver
     garantir_malha_uf, chamada por geographic_analysis.carregar_malha)."""
-    return _garantir_votacao_secao_uf(uf)
+    return _garantir_votacao_secao_uf(uf, ano)
 
 
 @st.cache_resource(show_spinner=False)
