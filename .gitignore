@@ -1,0 +1,35 @@
+# Ambiente virtual
+.venv/
+venv/
+
+# Dados brutos/derivados (TSE/IBGE) - grandes demais para o Git, baixados
+# sob demanda (ver src/cloud_data_bootstrap.py, src/uf_data_bootstrap.py)
+data/raw/
+data/cache/
+data/geographic/
+data/processed/
+data/cloud_bundle/
+
+# Saidas geradas (relatorios, exports) - nao versionar
+outputs/reports/*.pdf
+outputs/reports/*.xlsx
+outputs/reports/*.html
+outputs/charts/
+outputs/maps/
+outputs/tables/
+outputs/logs/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Editor/OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

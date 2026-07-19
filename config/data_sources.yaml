@@ -1,0 +1,168 @@
+# Fontes de dados oficiais utilizadas pelo sistema.
+# Cada entrada registra origem, ano, arquivo local esperado e metodologia,
+# conforme exigido no diagnostico (secao 3 e 4 do briefing): nenhuma variavel
+# pode ser usada sem origem, arquivo, ano e metodologia documentados.
+#
+# O sistema cobre o Brasil inteiro. Duas categorias de fonte:
+#
+# 1) NACIONAIS (arquivo_local abaixo aponta direto para o arquivo, sempre
+#    disponivel): registro de candidatos, eleitorado por local de votacao,
+#    detalhe de comparecimento/abstencao e os agregados censitarios do
+#    IBGE. Todas ja vinham de um arquivo unico nacional na origem - apenas
+#    reduzidas a colunas/formato mais leve (Parquet/ZSTD) por
+#    scripts/preparar_dados_nacionais.py. Pequenas o suficiente (dezenas de
+#    MB no total) para ficar sempre disponiveis via GitHub Release (ver
+#    pacote_cloud abaixo / src/cloud_data_bootstrap.py).
+#
+# 2) POR UF, SOB DEMANDA (nao tem arquivo_local fixo aqui - o caminho
+#    depende da UF da candidatura buscada): votacao_secao (TSE, o maior
+#    arquivo do sistema - >1GB por estado) e a malha de setores
+#    censitarios/bairros (IBGE CD2022). Baixadas e convertidas
+#    automaticamente na primeira busca de um candidato daquele estado (ver
+#    src/uf_data_bootstrap.py) - pre-processar as 27 UFs de uma vez nao
+#    caberia no ambiente gratuito de deploy.
+
+tse:
+  consulta_candidatos:
+    descricao: "Registro oficial de candidaturas: partido, coligacao/federacao, situacao da candidatura, resultado final por turno - Brasil inteiro"
+    fonte: "TSE - Consulta de candidatos (dadosabertos.tse.jus.br)"
+    ano: 2024
+    arquivo_local: "data/raw/consulta_cand_2024_BR.parquet"
+    url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/consulta_cand/consulta_cand_2024.zip"
+    observacao: "O zip oficial contem um CSV por UF mais um consulta_cand_2024_BRASIL.csv ja combinado - usado aqui. Arquivo leve (~12MB), permite descobrir em qual(is) UF(s) um numero de candidato foi registrado antes de baixar os votos daquele estado."
+
+  votacao_secao:
+    descricao: "Votacao por secao eleitoral - Eleicoes Municipais 2024. Baixado e convertido SOB DEMANDA por UF (ver src/uf_data_bootstrap.py) - nao ha um arquivo_local fixo aqui; o caminho e data/raw/votacao_secao_2024_{UF}.parquet, resolvido a partir da UF da candidatura."
+    fonte: "TSE - Repositorio de dados eleitorais (dadosabertos.tse.jus.br)"
+    ano: 2024
+    url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/votacao_secao/votacao_secao_2024_{uf}.zip"
+
+  eleitorado_local_votacao:
+    descricao: "Local de votacao com endereco e coordenadas - Brasil inteiro"
+    fonte: "TSE - Eleitorado por local de votacao (dadosabertos.tse.jus.br)"
+    ano: 2024
+    arquivo_local: "data/raw/eleitorado_local_votacao_BR.parquet"
+    url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/eleitorado_locais_votacao/eleitorado_local_votacao_2024.zip"
+    observacao: "Arquivo original ja e nacional (nao filtrado por UF). NR_LATITUDE/NR_LONGITUDE ja no formato correto."
+
+  detalhe_votacao_secao:
+    descricao: "Comparecimento, abstencao, votos brancos/nulos/legenda por secao - Brasil inteiro"
+    fonte: "TSE - Detalhe da votacao por secao (dadosabertos.tse.jus.br)"
+    ano: 2024
+    arquivo_local: "data/raw/detalhe_votacao_secao_2024_BR.parquet"
+    url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/detalhe_votacao_secao/detalhe_votacao_secao_2024.zip"
+    observacao: "Arquivo original ja e nacional (zip contem detalhe_votacao_secao_2024_BRASIL.csv combinado)."
+
+ibge:
+  # Malha de setores censitarios/bairros (CD2022): sem entrada fixa aqui -
+  # baixada por UF sob demanda (ver src/uf_data_bootstrap.py). Padrao de
+  # URL (mesmo para qualquer UF, confirmado no geoftp do IBGE):
+  #   setores: https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_de_setores_censitarios__divisoes_intramunicipais/censo_2022/setores/gpkg/UF/{uf}/{uf}_setores_CD2022.gpkg
+  #   bairros: https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_de_setores_censitarios__divisoes_intramunicipais/censo_2022/bairros/gpkg/UF/{uf}/{uf}_bairros_CD2022.gpkg
+
+  agregados_demografia:
+    descricao: "Agregados por setor censitario - demografia (sexo, idade) - Brasil inteiro"
+    fonte: "IBGE - Censo Demografico 2022 - Agregados por Setores Censitarios"
+    ano: 2022
+    arquivo_local: "data/raw/demografia_setores_BR.parquet"
+    arquivo_zip_original: "C:/Users/Tales/Downloads/Agregados_por_setores_demografia_BR.zip"
+
+  agregados_cor_raca:
+    descricao: "Agregados por setor censitario - cor ou raca - Brasil inteiro"
+    fonte: "IBGE - Censo Demografico 2022 - Agregados por Setores Censitarios"
+    ano: 2022
+    arquivo_local: "data/raw/cor_raca_setores_BR.parquet"
+    arquivo_zip_original: "C:/Users/Tales/Downloads/Agregados_por_setores_cor_ou_raca_BR.zip"
+
+  agregados_alfabetizacao:
+    descricao: "Agregados por setor censitario - alfabetizacao - Brasil inteiro"
+    fonte: "IBGE - Censo Demografico 2022 - Agregados por Setores Censitarios"
+    ano: 2022
+    arquivo_local: "data/raw/alfabetizacao_setores_BR.parquet"
+    arquivo_zip_original: "C:/Users/Tales/Downloads/Agregados_por_setores_alfabetizacao_BR.zip"
+
+  agregados_renda:
+    descricao: "Agregados por setor censitario - rendimento do responsavel (V06001 pessoas responsaveis; V06002 moradores; V06004 renda nominal media mensal do responsavel) - Brasil inteiro"
+    fonte: "IBGE - Censo Demografico 2022 - Agregados por Setores Censitarios - Rendimento do Responsavel"
+    ano: 2022
+    arquivo_local: "data/raw/renda_setores_BR.parquet"
+    arquivo_zip_original: "C:/Users/Tales/Downloads/Agregados_por_setores_renda_responsavel_BR_csv.zip"
+    dicionario: "data/raw/dicionario_renda_responsavel.xlsx"
+    url_dicionario: "https://ftp.ibge.gov.br/Censos/Censo_Demografico_2022/Agregados_por_Setores_Censitarios_Rendimento_do_Responsavel/dicionario_de_dados_renda_responsavel_20260508.xlsx"
+
+  agregados_parentesco:
+    descricao: "Agregados por setor censitario - parentesco (responsavel pelo domicilio, por sexo - V01042 total, V01062 homem, V01063 mulher) - Brasil inteiro"
+    fonte: "IBGE - Censo Demografico 2022 - Agregados por Setores Censitarios"
+    ano: 2022
+    arquivo_local: "data/raw/parentesco_setores_BR.parquet"
+    arquivo_zip_original: "C:/Users/Tales/Downloads/Agregados_por_setores_parentesco_BR.zip"
+    url_padrao: "https://ftp.ibge.gov.br/Censos/Censo_Demografico_2022/Agregados_por_Setores_Censitarios/Agregados_por_Setor_csv/Agregados_por_setores_parentesco_BR.zip"
+
+  agregados_domicilio2:
+    descricao: "Agregados por setor censitario - caracteristicas do domicilio parte 2 (agua encanada V00199-201, esgotamento sanitario V00309-316, coleta de lixo V00397-402) - Brasil inteiro"
+    fonte: "IBGE - Censo Demografico 2022 - Agregados por Setores Censitarios"
+    ano: 2022
+    arquivo_local: "data/raw/domicilio2_setores_BR.parquet"
+    arquivo_zip_original: "C:/Users/Tales/Downloads/Agregados_por_setores_caracteristicas_domicilio2_BR_20250417.zip"
+    url_padrao: "https://ftp.ibge.gov.br/Censos/Censo_Demografico_2022/Agregados_por_Setores_Censitarios/Agregados_por_Setor_csv/Agregados_por_setores_caracteristicas_domicilio2_BR_20250417.zip"
+    observacao: "Diferente de caracteristicas_domicilio1 (excluido em variaveis_excluidas_automaticamente por falta de identificacao clara), estas variaveis tem denominador e descricao inequivocos no dicionario oficial do IBGE."
+
+mte:
+  rais_estabelecimentos:
+    descricao: >
+      RAIS Estabelecimentos - agregado por municipio (vinculos formais
+      ativos/CLT, estabelecimentos ativos), Brasil inteiro. Nivel:
+      MUNICIPIO (a base original tem CNAE por estabelecimento, mas nao tem
+      distrito/bairro fora de SP capital - por isso o agregado usado aqui
+      e municipal, mostrado como contexto economico, nao como variavel de
+      regressao territorial dentro do municipio).
+    fonte: "Ministerio do Trabalho e Emprego - RAIS (microdados nao identificados, dados publicos)"
+    ano: 2023
+    arquivo_local: "data/raw/rais_municipio_2023_BR.parquet"
+    arquivo_bruto_estabelecimento: "data/raw/rais_estabelecimentos_BR.parquet"
+    url_padrao: "ftp://ftp.mtps.gov.br/pdet/microdados/RAIS/2023/RAIS_ESTAB_PUB.7z"
+    observacao: >
+      Codigo de municipio da RAIS e o codigo IBGE de 7 digitos SEM o
+      digito verificador final (ex.: Sao Paulo capital = 3550308 (IBGE) ->
+      355030 (RAIS)). Conversao feita em src/economic_analysis.py. Os 6
+      primeiros digitos do codigo IBGE ja identificam o municipio de forma
+      unica em todo o Brasil (o 7o digito e apenas verificador) - sem
+      risco de colisao entre municipios de UFs diferentes.
+
+  caged:
+    descricao: >
+      Novo CAGED - saldo de admissoes/desligamentos formais, consolidado
+      para o ano de 2024 (12 meses), agregado por municipio, Brasil
+      inteiro. Mesmo nivel de granularidade (municipio) e mesma ressalva
+      da RAIS Estabelecimentos.
+    fonte: "Ministerio do Trabalho e Emprego - Novo CAGED (dados publicos, movimentacao nao identificada)"
+    ano: 2024
+    arquivo_local: "data/raw/caged_saldo_2024_BR.parquet"
+    url_padrao: "ftp://ftp.mtps.gov.br/pdet/microdados/NOVO%20CAGED/2024/{mes}/CAGEDMOV{mes}.7z"
+
+# Familias de variaveis explicitamente EXCLUIDAS do uso automatico (secao 4 do
+# briefing): variaveis genericas de caracteristicas do domicilio (dom1/dom2/dom3)
+# nao possuem identificacao clara suficiente para uso automatico.
+variaveis_excluidas_automaticamente:
+  - "Agregados_por_setores_caracteristicas_domicilio1_BR.zip"
+
+# Pacote de dados NACIONAIS (sempre disponiveis, baixado uma unica vez) para
+# deploy em nuvem - ver scripts/preparar_dados_nacionais.py e
+# src/cloud_data_bootstrap.py. NAO inclui votacao_secao nem a malha de
+# setores/bairros por UF - esses sao baixados sob demanda (ver
+# src/uf_data_bootstrap.py), nunca pre-carregados aqui.
+pacote_cloud:
+  descricao: "Download automatico dos arquivos nacionais quando ausentes localmente"
+  url_base: "https://github.com/talesalonso1996-ops/sistema-inteligencia-eleitoral/releases/download/dados-v2"
+  arquivos:
+    - "consulta_cand_2024_BR.parquet"
+    - "eleitorado_local_votacao_BR.parquet"
+    - "detalhe_votacao_secao_2024_BR.parquet"
+    - "demografia_setores_BR.parquet"
+    - "cor_raca_setores_BR.parquet"
+    - "alfabetizacao_setores_BR.parquet"
+    - "renda_setores_BR.parquet"
+    - "rais_municipio_2023_BR.parquet"
+    - "caged_saldo_2024_BR.parquet"
+    - "parentesco_setores_BR.parquet"
+    - "domicilio2_setores_BR.parquet"

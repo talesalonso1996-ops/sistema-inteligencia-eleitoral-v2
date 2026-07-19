@@ -1,0 +1,198 @@
+# Pesos do Indice de Performance Eleitoral Territorial (0-100).
+# Alteravel sem mexer no codigo (secao 11 do briefing). A soma dos pesos
+# deve ser 1.0 - validado em src/potential_index.py.
+
+indice_performance:
+  pesos:
+    percentual_votos_territorio: 0.30      # % de votos validos do candidato no territorio
+    desempenho_vs_media: 0.20              # desvio em relacao a media geral do candidato
+    participacao_no_total_candidato: 0.15  # quanto do total de votos do candidato vem deste territorio
+    comparecimento: 0.10                   # comparecimento do territorio (eleitorado ativo)
+    distancia_concorrente_principal: 0.15  # quao perto/longe do 1o colocado no territorio
+    concentracao_territorial_penalidade: 0.10  # penaliza dependencia excessiva de 1 territorio
+
+  limites_classificacao:
+    fortaleza: 80
+    consolidado: 60
+    competitivo: 40
+    crescimento: 20
+    baixa_penetracao: 0
+
+  limitacoes_metodologicas: >
+    Indice construido a partir de dados agregados por territorio (municipio,
+    zona, local de votacao ou bairro) e nao permite qualquer inferencia sobre
+    o voto de eleitores individuais. Pesos sao normativos, definidos manualmente
+    e podem ser recalibrados neste arquivo. Nao ha validacao externa (pesquisa
+    de opiniao) associada ao indice.
+
+clustering:
+  algoritmo_padrao: "kmeans"
+  k_min: 2
+  k_max: 8
+  k_fixo: 10  # segmentacao padrao exibida no produto (secao "Estatistica Avancada")
+  # ATENCAO: pct_branca, pct_preta, pct_parda, pct_amarela, pct_indigena e
+  # pct_preta_parda (=pct_preta+pct_parda) sao fatias complementares da
+  # MESMA populacao (somam ~100%) - incluir pct_branca junto com
+  # pct_preta_parda + pct_amarela + pct_indigena aqui causaria colinearidade
+  # perfeita (a soma das 4 e sempre ~100%, uma combinacao linear exata das
+  # outras 3 mais o intercepto), quebrando a regressao (matriz singular).
+  # Por isso pct_branca fica de fora da lista (categoria de referencia
+  # implicita, mesma logica de "category left out" em variaveis dummy) -
+  # continua calculada e disponivel em perfil_demografico_do_territorio,
+  # so nao entra no conjunto padrao de regressao/clustering/Maslow.
+  variaveis_demograficas:
+    - "renda_media_responsavel"
+    - "pct_alfabetizado_15mais"
+    - "pct_preta_parda"
+    - "idade_media_aprox"
+    - "pct_masculino"
+    - "pct_amarela"
+    - "pct_indigena"
+    - "pct_domicilios_chefia_feminina"
+    - "pct_agua_encanada"
+    - "pct_esgoto_adequado"
+    - "pct_coleta_lixo"
+
+# Abordagem de Maslow (secao "Abordagem de Maslow" do produto).
+#
+# ATENCAO METODOLOGICA: a Piramide de Maslow e uma teoria psicologica sobre
+# motivacao INDIVIDUAL - nao e mensuravel diretamente a partir de dados
+# agregados de setor censitario. Este bloco NAO define uma medicao
+# psicologica: define, de forma transparente e auditavel, qual variavel
+# demografica (das mesmas 5 ja usadas em clustering.variaveis_demograficas)
+# funciona como PROXY socioeconomico de cada nivel da piramide, seguindo a
+# forma como a literatura de ciencias sociais opera Maslow empiricamente
+# (renda/escolaridade como proxies de status/seguranca material). Niveis sem
+# proxy defensavel (Social/Pertencimento, Autorrealizacao) ficam
+# explicitamente marcados como lacuna (status: "sem_proxy") - nunca
+# preenchidos com uma variavel fraca so para completar a piramide.
+piramide_maslow:
+  # Ordem hierarquica da base ao topo - tambem usada para desenhar o grafico.
+  ordem_tiers:
+    - fisiologico
+    - seguranca
+    - social
+    - estima
+    - autorrealizacao
+
+  tiers:
+    fisiologico:
+      label: "Fisiologico"
+      status: "mapeado"
+      variaveis:
+        - nome: "renda_media_responsavel"
+          rationale: >
+            Renda media do responsavel pelo domicilio e o proxy
+            socioeconomico (SES) classico para capacidade de suprir
+            necessidades materiais basicas - indicador padrao de privacao/
+            seguranca material em ciencias sociais.
+        - nome: "pct_agua_encanada"
+          rationale: >
+            Acesso a agua encanada dentro do domicilio e uma necessidade
+            fisiologica basica na propria formulacao original de Maslow -
+            indicador DIRETO de infraestrutura sanitaria do territorio, nao
+            um proxy socioeconomico indireto como renda.
+        - nome: "pct_esgoto_adequado"
+          rationale: >
+            Esgotamento sanitario adequado (rede geral/pluvial ou fossa
+            septica ligada a rede) e infraestrutura basica de saneamento -
+            mesma logica de necessidade fisiologica direta que agua
+            encanada.
+        - nome: "pct_coleta_lixo"
+          rationale: >
+            Coleta regular de lixo e infraestrutura sanitaria basica do
+            territorio - mesma logica de necessidade fisiologica direta.
+
+    seguranca:
+      label: "Seguranca"
+      status: "mapeado"
+      variaveis:
+        - nome: "renda_media_responsavel"
+          rationale: >
+            A mesma renda tambem serve de proxy para seguranca financeira/
+            material (SES cobre Fisiologico e Seguranca em conjunto; nao ha,
+            nesta base, uma variavel especifica so para seguranca fisica -
+            por isso a mesma variavel aparece nos dois niveis adjacentes).
+        - nome: "pct_preta_parda"
+          rationale: >
+            Literatura brasileira sobre desigualdade racial e exposicao a
+            violencia/vulnerabilidade estrutural (ex.: Atlas da Violencia,
+            IPEA) associa percentual de populacao preta/parda de um
+            territorio a maior insegurança estrutural. IMPORTANTE: e uma
+            proxy SOCIOLOGICA sobre o TERRITORIO (contexto de politica
+            publica e desigualdade historica), nao uma afirmacao sobre
+            individuos ou sobre a psicologia de uma raca - inclusao
+            confirmada explicitamente pelo cliente, com esta ressalva
+            sempre exibida junto ao dado.
+
+    social:
+      label: "Social / Pertencimento"
+      status: "sem_proxy"
+      variaveis: []
+      motivo_sem_proxy: >
+        Nao ha, nas variaveis demograficas de setor censitario disponiveis
+        nesta base, nenhum indicador de vinculo comunitario ou pertencimento
+        social - dado nao mensuravel a partir do Censo 2022 usado aqui.
+
+    estima:
+      label: "Estima"
+      status: "mapeado"
+      variaveis:
+        - nome: "pct_alfabetizado_15mais"
+          rationale: >
+            Escolaridade/alfabetizacao e um proxy consolidado na literatura
+            de ciencias sociais para status social, reconhecimento e
+            dignidade (capital cultural associado a educacao).
+
+    autorrealizacao:
+      label: "Autorrealizacao"
+      status: "sem_proxy"
+      variaveis: []
+      motivo_sem_proxy: >
+        Autorrealizacao e um construto psicologico individual de dificil
+        operacionalizacao com dados agregados de setor censitario - nenhuma
+        variavel disponivel nesta base e um proxy defensavel.
+
+  # Variaveis usadas no modelo estatistico mas sem correspondencia teorica
+  # direta com nenhum nivel da piramide (controles demograficos, mostrados
+  # a parte, nunca forcados em um nivel so para "completar" a analise).
+  variaveis_sem_correspondencia_teorica:
+    - nome: "idade_media_aprox"
+      motivo: >
+        Variavel de controle demografico (faixa etaria media), sem
+        correspondencia teorica direta com nenhum nivel da piramide de
+        Maslow.
+    - nome: "pct_masculino"
+      motivo: >
+        Variavel de controle demografico (composicao por sexo), sem
+        correspondencia teorica direta com nenhum nivel da piramide de
+        Maslow.
+    - nome: "pct_amarela"
+      motivo: >
+        Mesmo motivo de pct_branca: sem rationale de literatura especifico
+        documentado para esta categoria racial.
+    - nome: "pct_indigena"
+      motivo: >
+        Mesmo motivo de pct_branca: a literatura de vulnerabilidade racial
+        usada para pct_preta_parda (Atlas da Violencia/IPEA) nao cobre
+        especificamente populacao indigena - existe literatura propria
+        sobre vulnerabilidade de povos indigenas, mas nao foi verificada/
+        documentada aqui com o mesmo rigor, entao a variavel fica sem
+        mapeamento em vez de usar uma citacao nao conferida.
+    - nome: "pct_domicilios_chefia_feminina"
+      motivo: >
+        Variavel de estrutura familiar (% domicilios com responsavel
+        mulher) sem rationale de literatura especifico documentado e
+        conferido para um nivel da piramide de Maslow - mantida em
+        clustering/regressao sem mapeamento, por ora.
+
+  aviso_metodologico: >
+    A Piramide de Maslow e uma teoria psicologica sobre motivacao
+    INDIVIDUAL, nao uma metrica diretamente mensuravel a partir de dados
+    agregados de setor censitario. Esta secao NAO mede o estado
+    psicologico do eleitorado: ela reinterpreta, como LENTE teorica, os
+    coeficientes/odds ratios JA CALCULADOS pelos modelos estatisticos
+    documentados na secao "Estatistica Avancada", associando cada variavel
+    demografica ao nivel da piramide que a literatura de ciencias sociais
+    usa como proxy empirico mais proximo. Nenhum numero novo e calculado
+    ou fabricado aqui.

@@ -1,0 +1,40 @@
+# Configuracoes gerais do sistema. Mantidas fora do codigo para permitir
+# ajuste sem alterar logica (secao 2 do briefing: preparar terreno para que
+# municipio/UF/cargo/ano possam ser fixados aqui no futuro).
+
+app:
+  titulo: "Sistema de Inteligencia Eleitoral"
+  ano_eleicao_padrao: 2024
+  uf_padrao: "SP"
+  cargo_padrao: null   # null = nao filtra por cargo na busca inicial
+  municipio_padrao: null
+
+paths:
+  data_raw: "data/raw"
+  data_processed: "data/processed"
+  data_geographic: "data/geographic"
+  data_cache: "data/cache"
+  outputs_reports: "outputs/reports"
+  outputs_charts: "outputs/charts"
+  outputs_maps: "outputs/maps"
+  outputs_tables: "outputs/tables"
+  outputs_logs: "outputs/logs"
+
+cache:
+  habilitado: true
+  formato: "parquet"
+
+logging:
+  nivel: "INFO"
+  arquivo: "outputs/logs/sistema.log"
+
+geografia:
+  # Malha geografica (setores censitarios + bairros CD2022) de qualquer UF
+  # e baixada sob demanda do IBGE (ver src/uf_data_bootstrap.py) na primeira
+  # busca de um candidato daquele estado - nao ha mais uma lista fixa de
+  # UFs "habilitadas". O CRS metrico usado no calculo de area (Voronoi) e
+  # a zona UTM SIRGAS 2000 correspondente, calculada dinamicamente a partir
+  # da longitude (ver src/voronoi_analysis.py:_crs_metrico_utm) - o Brasil
+  # cobre varias zonas UTM (17S a 25S), entao uma zona fixa introduziria
+  # distorcao de area fora da regiao daquela zona.
+  crs_geografico: "EPSG:4674"  # SIRGAS 2000 lat/long
