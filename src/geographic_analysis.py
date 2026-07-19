@@ -507,7 +507,7 @@ def carregar_coordenadas_uf(uf: str) -> pd.DataFrame:
     )
     sql = f"""
         SELECT
-            CD_MUNICIPIO, ANY_VALUE(NM_MUNICIPIO) AS NM_MUNICIPIO,
+            TRY_CAST(CD_MUNICIPIO AS INTEGER) AS CD_MUNICIPIO, ANY_VALUE(NM_MUNICIPIO) AS NM_MUNICIPIO,
             NR_ZONA, NR_LOCAL_VOTACAO,
             ANY_VALUE(NM_LOCAL_VOTACAO) AS NM_LOCAL_VOTACAO,
             ANY_VALUE(NM_BAIRRO) AS NM_BAIRRO,

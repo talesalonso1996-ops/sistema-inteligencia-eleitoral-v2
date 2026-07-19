@@ -341,6 +341,20 @@ def _carregar_geografia_estadual(numero, uf, cargo, ano, turno, _candidatura: Ca
 
 
 @st.cache_data(show_spinner=False)
+def _carregar_geografia_estadual_secao(numero, uf, cargo, ano, turno, _candidatura: Candidatura, _vc: pd.DataFrame):
+    """Como _carregar_geografia_estadual, mas por SECAO (nao por predio) -
+    usado quando o usuario escolhe analisar 1 municipio da UF por bairro
+    (V2): precisa da mesma granularidade de secao/setor ja usada pelo
+    caminho municipal (_geo_secao), so calculada para a UF inteira antes
+    de filtrar para o municipio escolhido (reaproveita a mesma malha ja
+    baixada, sem download adicional)."""
+    coords = carregar_coordenadas_uf(uf)
+    pontos = juntar_votos_com_coordenadas_secao(_vc, coords)
+    enriquecido, avisos = atribuir_setor_e_bairro_uf(pontos, uf)
+    return pontos, enriquecido, avisos
+
+
+@st.cache_data(show_spinner=False)
 def _carregar_demografia_estadual(
     numero, uf, cargo, ano, turno, _enriquecido: pd.DataFrame, _vd: pd.DataFrame,
 ):
@@ -544,6 +558,13 @@ def _demo_uf(enriquecido_df: pd.DataFrame):
     )
 
 
+def _geo_uf_secao():
+    return _carregar_geografia_estadual_secao(
+        candidatura.numero, candidatura.uf, candidatura.cargo,
+        candidatura.ano_eleicao, candidatura.turno, candidatura, vc,
+    )
+
+
 # ----------------------------------------------------------- Cabecalho fixo
 st.markdown(
     f"""
@@ -569,13 +590,37 @@ if _permite_2o_turno:
     _opcoes_secao += ["Comparacao de Turnos"]
 _opcoes_secao += ["Relatorio"]
 secao = st.sidebar.radio("Navegacao", _opcoes_secao)
+
+_modo_estadual = None
+_municipio_bairro_nome = None
+_municipio_bairro_codigo = None
 if not _eh_municipal:
-    st.sidebar.caption(
-        "Cargo estadual: Geografia/Demografia/Estatistica Avancada/Maslow "
-        "cobrem a UF inteira (todos os municipios), calculados sob demanda "
-        "ao abrir a aba - a primeira abertura por UF pode levar cerca de 1 "
-        "minuto (malha geografica), as seguintes ficam em cache."
+    st.sidebar.divider()
+    _modo_label = st.sidebar.radio(
+        "Nivel em Geografia/Demografia/Estatistica/Maslow",
+        ["Municipio (UF inteira)", "Bairro (escolher 1 municipio)"],
+        key="v2_modo_estadual",
     )
+    _modo_estadual = "municipio" if _modo_label.startswith("Municipio") else "bairro"
+    if _modo_estadual == "municipio":
+        st.sidebar.caption(
+            "Cobre a UF inteira (todos os municipios), calculado sob demanda ao "
+            "abrir a aba - a primeira abertura por UF pode levar cerca de 1 "
+            "minuto (malha geografica), as seguintes ficam em cache."
+        )
+    else:
+        _municipios_uf_disponiveis = sorted(vd["NM_MUNICIPIO"].dropna().unique())
+        _municipio_bairro_nome = st.sidebar.selectbox(
+            "Municipio para analise por bairro", _municipios_uf_disponiveis, key="v2_municipio_bairro",
+        )
+        _municipio_bairro_codigo = int(
+            vd.loc[vd["NM_MUNICIPIO"] == _municipio_bairro_nome, "CD_MUNICIPIO"].iloc[0]
+        )
+        st.sidebar.caption(
+            f"Analise de bairro restrita a {_municipio_bairro_nome} - mesmo detalhamento "
+            "usado para Prefeito/Vereador (2024), aplicado aos votos deste candidato "
+            "estadual dentro deste municipio."
+        )
 
 # ============================================================ Visao Geral
 if secao == "Visao Geral":
@@ -837,6 +882,74 @@ elif secao == "Detalhamento Proporcional":
             st.dataframe(federacoes_rel, use_container_width=True, height=250)
 
 # =============================================================== Geografia
+elif secao == "Geografia" and not _eh_municipal and _modo_estadual == "bairro":
+    if not uf_tem_malha_completa(candidatura.uf):
+        st.info(f"Malha geografica nao configurada para a UF '{candidatura.uf}'.")
+    else:
+        with st.spinner(
+            f"Localizando locais de votacao da UF {candidatura.uf} inteira e cruzando com "
+            "setores/bairros (IBGE) - a primeira vez pode levar cerca de 1 minuto..."
+        ):
+            pontos_uf, enriquecido_uf_bairro, avisos_geo_uf_bairro = _geo_uf()
+
+        for aviso in avisos_geo_uf_bairro:
+            st.warning(aviso)
+
+        pontos = pontos_uf[pontos_uf["CD_MUNICIPIO"] == _municipio_bairro_codigo].reset_index(drop=True)
+        enriquecido = enriquecido_uf_bairro[
+            enriquecido_uf_bairro["CD_MUNICIPIO"] == _municipio_bairro_codigo
+        ].reset_index(drop=True)
+
+        if enriquecido.empty:
+            st.info(f"Nenhum local de votacao encontrado para {_municipio_bairro_nome}.")
+        else:
+            bairros_agg = agregar_votos_por_bairro(enriquecido)
+            with st.container(border=True):
+                st.plotly_chart(charts.grafico_votos_por_bairro(bairros_agg), use_container_width=True)
+
+            with st.container(border=True):
+                st.subheader(f"Mapa de locais de votacao - {_municipio_bairro_nome}")
+                mapa_pontos = maps.mapa_locais_votacao(enriquecido, candidatura.nome_urna)
+                st_folium(mapa_pontos, width=None, height=500, key="mapa_pontos_bairro")
+
+            with st.container(border=True):
+                malha_bairros = carregar_malha("bairros", _municipio_bairro_nome, candidatura.uf)
+                if malha_bairros is not None:
+                    st.subheader(f"Mapa coropletico por bairro - {_municipio_bairro_nome}")
+                    malha_gdf = malha_bairros
+                    coluna_nivel, coluna_malha = "NM_BAIRRO_IBGE", "NM_BAIRRO"
+                else:
+                    st.subheader(
+                        f"Mapa coropletico por distrito - {_municipio_bairro_nome} "
+                        "(malha de bairro sem poligonos para este municipio)"
+                    )
+                    malha_gdf = carregar_malha("setores", _municipio_bairro_nome, candidatura.uf)
+                    coluna_nivel, coluna_malha = "NM_DIST", "NM_DIST"
+
+                if coluna_nivel in enriquecido.columns and enriquecido[coluna_nivel].notna().any() and malha_gdf is not None:
+                    territorios_gdf = malha_gdf.dissolve(by=coluna_malha, as_index=False)
+                    votos_territorio = enriquecido.groupby(coluna_nivel, as_index=False)["votos_candidato"].sum()
+                    mapa_choro = maps.mapa_choropleth_territorio(
+                        territorios_gdf, votos_territorio, coluna_malha, coluna_nivel,
+                        "votos_candidato", candidatura.nome_urna,
+                    )
+                    st_folium(mapa_choro, width=None, height=500, key="mapa_choro_bairro")
+                else:
+                    st.info("Malha de bairro/distrito indisponivel para o mapa coropletico.")
+
+            with st.container(border=True):
+                st.subheader("Diagrama de Voronoi (area de influencia por local de votacao)")
+                fronteira = malha_bairros if malha_bairros is not None else carregar_malha(
+                    "setores", _municipio_bairro_nome, candidatura.uf
+                )
+                if fronteira is not None:
+                    voronoi = gerar_voronoi(pontos, fronteira)
+                    if voronoi is not None:
+                        mapa_voronoi = maps.mapa_voronoi(voronoi)
+                        st_folium(mapa_voronoi, width=None, height=500, key="mapa_voronoi_bairro")
+                    else:
+                        st.info("Numero insuficiente de locais com coordenada unica para gerar o Voronoi.")
+
 elif secao == "Geografia" and not _eh_municipal:
     if not uf_tem_malha_completa(candidatura.uf):
         st.info(f"Malha geografica nao configurada para a UF '{candidatura.uf}'.")
@@ -871,6 +984,7 @@ elif secao == "Geografia" and not _eh_municipal:
                 mapa_choro_uf = maps.mapa_choropleth_territorio(
                     malha_municipios, terr_mun_geo, "_nome_norm", "_nome_norm",
                     "votos_candidato", candidatura.nome_urna, zoom_start=6,
+                    simplificar_tolerancia=0.005,
                 )
                 st_folium(mapa_choro_uf, width=None, height=550, key="mapa_choro_uf")
             else:
@@ -959,6 +1073,23 @@ elif secao == "Demografia":
                 "Demografico 2022, IBGE). Secoes do mesmo local de votacao compartilham o "
                 "mesmo perfil (mesma coordenada) - variam apenas nos votos do candidato."
             )
+        elif _modo_estadual == "bairro":
+            with st.spinner(f"Cruzando {_municipio_bairro_nome} com o Censo 2022 (IBGE)..."):
+                _, enriquecido_secao_uf_demo, avisos_bairro_demo = _geo_uf_secao()
+                for aviso in avisos_bairro_demo:
+                    st.warning(aviso)
+                enriquecido_demo = enriquecido_secao_uf_demo[
+                    enriquecido_secao_uf_demo["CD_MUNICIPIO"] == _municipio_bairro_codigo
+                ].reset_index(drop=True)
+                perfil_setor, base_territorio = _carregar_demografia(
+                    candidatura.numero, _municipio_bairro_codigo, candidatura.cargo,
+                    candidatura.ano_eleicao, candidatura.turno, enriquecido_demo, vd,
+                )
+            _explicacao_demografia = (
+                f"Perfil demografico por secao eleitoral, restrito a {_municipio_bairro_nome} "
+                f"(UF {candidatura.uf}) - mesmo detalhamento usado para Prefeito/Vereador (2024), "
+                "aplicado aos votos deste candidato estadual dentro deste municipio."
+            )
         else:
             with st.spinner(f"Cruzando a UF {candidatura.uf} inteira com o Censo 2022 (IBGE)..."):
                 _, enriquecido_demo, avisos_demo_uf = _geo_uf()
@@ -1001,13 +1132,29 @@ elif secao == "Estatistica Avancada":
             if _eh_municipal:
                 _, enriquecido_est, _ = _geo_secao()
                 perfil_setor, base_territorio = _demo(enriquecido_est)
+            elif _modo_estadual == "bairro":
+                _, enriquecido_est_uf, avisos_est_bairro = _geo_uf_secao()
+                for aviso in avisos_est_bairro:
+                    st.warning(aviso)
+                enriquecido_est = enriquecido_est_uf[
+                    enriquecido_est_uf["CD_MUNICIPIO"] == _municipio_bairro_codigo
+                ].reset_index(drop=True)
+                perfil_setor, base_territorio = _carregar_demografia(
+                    candidatura.numero, _municipio_bairro_codigo, candidatura.cargo,
+                    candidatura.ano_eleicao, candidatura.turno, enriquecido_est, vd,
+                )
             else:
                 _, enriquecido_est, avisos_est = _geo_uf()
                 for aviso in avisos_est:
                     st.warning(aviso)
                 perfil_setor, base_territorio = _demo_uf(enriquecido_est)
 
-        if not _eh_municipal and not base_territorio.empty:
+        if not _eh_municipal and _modo_estadual == "bairro" and not base_territorio.empty:
+            _explicacao(
+                f"Unidade de observacao: secao eleitoral, restrito a {_municipio_bairro_nome} "
+                f"(UF {candidatura.uf}) - {len(base_territorio)} secoes."
+            )
+        elif not _eh_municipal and not base_territorio.empty:
             _explicacao(
                 f"Unidade de observacao: MUNICIPIO (UF {candidatura.uf} inteira, "
                 f"{len(base_territorio)} municipios) - nao secao/local de votacao, que so "
@@ -1018,7 +1165,10 @@ elif secao == "Estatistica Avancada":
             st.info("Dados insuficientes para analise estatistica territorial.")
         else:
             variaveis_disp = [v for v in VARIAVEIS_DEMOGRAFICAS if v in base_territorio.columns]
-            nivel_estatistica = _NIVEL_TERRITORIO_DEMOGRAFICO if _eh_municipal else "CD_MUNICIPIO"
+            nivel_estatistica = (
+                "CD_MUNICIPIO" if (not _eh_municipal and _modo_estadual == "municipio")
+                else _NIVEL_TERRITORIO_DEMOGRAFICO
+            )
 
             with st.container(border=True):
                 st.subheader("Correlacao com o desempenho eleitoral")
@@ -1146,13 +1296,29 @@ elif secao == "Abordagem de Maslow":
             if _eh_municipal:
                 _, enriquecido_maslow, _ = _geo_secao()
                 perfil_setor, base_territorio = _demo(enriquecido_maslow)
+            elif _modo_estadual == "bairro":
+                _, enriquecido_maslow_uf, avisos_maslow_bairro = _geo_uf_secao()
+                for aviso in avisos_maslow_bairro:
+                    st.warning(aviso)
+                enriquecido_maslow = enriquecido_maslow_uf[
+                    enriquecido_maslow_uf["CD_MUNICIPIO"] == _municipio_bairro_codigo
+                ].reset_index(drop=True)
+                perfil_setor, base_territorio = _carregar_demografia(
+                    candidatura.numero, _municipio_bairro_codigo, candidatura.cargo,
+                    candidatura.ano_eleicao, candidatura.turno, enriquecido_maslow, vd,
+                )
             else:
                 _, enriquecido_maslow, avisos_maslow = _geo_uf()
                 for aviso in avisos_maslow:
                     st.warning(aviso)
                 perfil_setor, base_territorio = _demo_uf(enriquecido_maslow)
 
-        if not _eh_municipal and not base_territorio.empty:
+        if not _eh_municipal and _modo_estadual == "bairro" and not base_territorio.empty:
+            _explicacao(
+                f"Unidade de observacao: secao eleitoral, restrito a {_municipio_bairro_nome} "
+                f"(UF {candidatura.uf})."
+            )
+        elif not _eh_municipal and not base_territorio.empty:
             _explicacao(
                 f"Unidade de observacao: MUNICIPIO (UF {candidatura.uf} inteira, "
                 f"{len(base_territorio)} municipios)."

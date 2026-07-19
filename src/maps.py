@@ -52,12 +52,25 @@ def mapa_choropleth_territorio(
     coluna_valor: str,
     nome_candidato: str,
     zoom_start: int = 11,
+    simplificar_tolerancia: float = 0.0,
 ) -> folium.Map:
     """Mapa coropletico: pinta cada poligono (bairro/distrito/setor/
     municipio) pela intensidade de votos do candidato (tom sequencial
     unico - azul). `zoom_start` menor (ex.: 6-7) para malhas que cobrem uma
-    UF inteira (V2, cargos estaduais) em vez de 1 municipio."""
+    UF inteira (V2, cargos estaduais) em vez de 1 municipio.
+
+    `simplificar_tolerancia` (graus, CRS EPSG:4674): reduz o numero de
+    vertices dos poligonos SO para a renderizacao do mapa (nunca afeta os
+    numeros/votos calculados, so a geometria desenhada) - necessario para
+    malhas grandes (ex.: contorno dissolvido dos ~645 municipios de SP tem
+    ~860 mil vertices / ~37MB de GeoJSON sem simplificar, o suficiente para
+    travar o navegador ao renderizar via Folium/Leaflet). 0 (padrao) = sem
+    simplificacao, mantem o comportamento identico ao anterior para os
+    mapas municipais (bairro/distrito/setor de 1 municipio, ja pequenos)."""
     malha_wgs84 = malha.to_crs("EPSG:4674")
+    if simplificar_tolerancia > 0:
+        malha_wgs84 = malha_wgs84.copy()
+        malha_wgs84["geometry"] = malha_wgs84.geometry.simplify(simplificar_tolerancia, preserve_topology=True)
     dados = malha_wgs84.merge(
         agregado, left_on=coluna_chave_malha, right_on=coluna_chave_agregado, how="left"
     )

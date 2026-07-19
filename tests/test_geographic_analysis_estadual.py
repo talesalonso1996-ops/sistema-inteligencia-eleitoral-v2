@@ -1,5 +1,6 @@
 """Testes das variantes ESTADUAIS (UF inteira) de geographic_analysis.py -
 Governador SP 2022 (piloto real, ja usado nos demais testes da V2)."""
+import pandas as pd
 import pytest
 
 from src.candidate_finder import (
@@ -31,6 +32,25 @@ def dados_governador_sp_enriquecido():
     pontos = juntar_votos_com_coordenadas(vc, coords)
     enriquecido, avisos = atribuir_setor_e_bairro_uf(pontos, "SP")
     return tarcisio, vc, vd, rd, enriquecido, avisos
+
+
+def test_coordenadas_uf_cd_municipio_e_numerico_compativel_com_votos(dados_governador_sp_enriquecido):
+    """Regressao real: carregar_coordenadas_uf devolvia CD_MUNICIPIO como
+    STRING (DuckDB nao tipava a coluna), enquanto votos_da_disputa (fonte
+    votacao_secao) sempre traz CD_MUNICIPIO como inteiro - um filtro
+    `enriquecido[enriquecido['CD_MUNICIPIO'] == codigo_int]` retornava
+    SEMPRE 0 linhas por causa disso (comparacao str vs int nunca bate em
+    pandas), quebrando silenciosamente qualquer analise de bairro dentro
+    de 1 municipio de uma disputa estadual. Corrigido com TRY_CAST no SQL -
+    o dtype final pode virar float64 (nao int) quando ha locais sem
+    coordenada (NaN apos o left-join), o que e esperado e inofensivo: o
+    que importa e que a comparacao numerica com o codigo do municipio
+    funcione, nao o dtype exato."""
+    _, _, vd, _, enriquecido, _ = dados_governador_sp_enriquecido
+    assert pd.api.types.is_numeric_dtype(enriquecido["CD_MUNICIPIO"])
+    codigo_campinas = int(vd.loc[vd["NM_MUNICIPIO"] == "CAMPINAS", "CD_MUNICIPIO"].iloc[0])
+    filtrado = enriquecido[enriquecido["CD_MUNICIPIO"] == codigo_campinas]
+    assert len(filtrado) > 0
 
 
 def test_coordenadas_uf_cobrem_multiplos_municipios():
@@ -93,3 +113,26 @@ def test_mapa_coropletico_estadual_gera_sem_erro(dados_governador_sp_enriquecido
         malha_mun, terr_mun, "_nome_norm", "_nome_norm", "votos_candidato", tarcisio.nome_urna, zoom_start=6,
     )
     assert mapa is not None
+
+
+def test_mapa_estadual_simplificado_fica_bem_menor_que_sem_simplificar():
+    """Regressao: o contorno dissolvido dos ~645 municipios de SP sem
+    simplificar tem ~37MB de GeoJSON (~860 mil vertices) - grande o
+    suficiente para travar o navegador ao renderizar via Folium/Leaflet
+    (caso real reportado). simplificar_tolerancia precisa reduzir isso
+    para uma fracao pequena, sem quebrar a geracao do mapa."""
+    malha = carregar_malha_municipios_uf("SP")
+    malha = malha.copy()
+    malha["_nome_norm"] = malha["NM_MUN"].apply(normalizar_nome_municipio)
+    agregado = malha[["_nome_norm"]].assign(votos_candidato=1)
+
+    mapa_cheio = mapa_choropleth_territorio(
+        malha, agregado, "_nome_norm", "_nome_norm", "votos_candidato", "Teste", zoom_start=6,
+    )
+    mapa_simplificado = mapa_choropleth_territorio(
+        malha, agregado, "_nome_norm", "_nome_norm", "votos_candidato", "Teste", zoom_start=6,
+        simplificar_tolerancia=0.005,
+    )
+    tamanho_cheio = len(mapa_cheio._repr_html_())
+    tamanho_simplificado = len(mapa_simplificado._repr_html_())
+    assert tamanho_simplificado < tamanho_cheio * 0.2
