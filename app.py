@@ -1251,6 +1251,15 @@ elif secao == "Estatistica Avancada":
                 f"{len(base_territorio)} observacoes, {_n_municipios_geral} municipios) - "
                 "Regressao Geral."
             )
+            if nivel_geral == "zona_uf_composta" and len(base_territorio) < 150:
+                st.warning(
+                    f"Esta UF tem poucas zonas eleitorais ({len(base_territorio)} zonas para "
+                    f"{_n_municipios_geral} municipios) - em estados pequenos, uma zona eleitoral "
+                    "costuma cobrir 1 unico municipio, entao o numero de observacoes fica quase "
+                    "igual ao da 'Regressao por Municipio' e a regressao ainda pode falhar por "
+                    "amostra insuficiente. Tente **Secao eleitoral** (muito mais observacoes, "
+                    "cobre o mesmo problema de amostra pequena)."
+                )
         elif not _eh_municipal and not base_territorio.empty:
             _explicacao(
                 f"Unidade de observacao: MUNICIPIO (UF {candidatura.uf} inteira, "
