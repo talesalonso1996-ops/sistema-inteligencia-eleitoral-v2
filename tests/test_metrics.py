@@ -1,4 +1,10 @@
-from src.electoral_metrics import desempenho_territorial, indice_concentracao_hhi, resultado_geral
+from src.electoral_metrics import (
+    desempenho_territorial,
+    enriquecer_com_comparecimento_abstencao,
+    indice_concentracao_hhi,
+    indice_participacao_territorial,
+    resultado_geral,
+)
 from src.potential_index import calcular_indice_performance
 from src.competitor_analysis import zonas_de_disputa
 
@@ -36,3 +42,51 @@ def test_indice_performance_dentro_de_0_100(candidatura_sp, dados_disputa):
 
     assert indice["indice_performance"].between(0, 100).all()
     assert indice["classificacao"].notna().all()
+
+
+def test_enriquecer_com_comparecimento_abstencao_adiciona_qt_aptos(candidatura_prefeito_sp):
+    """Regressao: a funcao lia QT_APTOS do arquivo de detalhe por secao mas
+    nunca agregava essa coluna no dataframe retornado - isso fazia o
+    componente 'comparecimento' do indice de performance (potential_index.py)
+    ficar sempre redistribuido (a checagem `'QT_APTOS' in df.columns` nunca
+    era verdadeira). QT_APTOS agora precisa estar presente e ser > 0."""
+    from src.candidate_finder import registro_candidatos_disputa, votos_da_candidatura, votos_da_disputa
+
+    vc = votos_da_candidatura(candidatura_prefeito_sp)
+    vd = votos_da_disputa(candidatura_prefeito_sp)
+    rd = registro_candidatos_disputa(candidatura_prefeito_sp)
+    terr = desempenho_territorial(candidatura_prefeito_sp, vc, vd, rd, "NR_ZONA")
+    terr = enriquecer_com_comparecimento_abstencao(
+        terr, candidatura_prefeito_sp.codigo_municipio_tse, candidatura_prefeito_sp.cargo, "NR_ZONA"
+    )
+    assert "QT_APTOS" in terr.columns
+    assert terr["QT_APTOS"].notna().any()
+    assert (terr["QT_APTOS"].dropna() > 0).all()
+
+
+def test_indice_participacao_territorial_percentuais_plausiveis(candidatura_prefeito_sp):
+    from src.candidate_finder import registro_candidatos_disputa, votos_da_candidatura, votos_da_disputa
+
+    vc = votos_da_candidatura(candidatura_prefeito_sp)
+    vd = votos_da_disputa(candidatura_prefeito_sp)
+    rd = registro_candidatos_disputa(candidatura_prefeito_sp)
+    terr = desempenho_territorial(candidatura_prefeito_sp, vc, vd, rd, "NR_ZONA")
+    terr = enriquecer_com_comparecimento_abstencao(
+        terr, candidatura_prefeito_sp.codigo_municipio_tse, candidatura_prefeito_sp.cargo, "NR_ZONA"
+    )
+    participacao = indice_participacao_territorial(terr)
+    assert participacao["pct_comparecimento"].dropna().between(0, 100).all()
+    assert participacao["pct_abstencao"].dropna().between(0, 100).all()
+    # comparecimento + abstencao devem somar ~100% do eleitorado apto
+    soma = participacao["pct_comparecimento"] + participacao["pct_abstencao"]
+    assert soma.dropna().sub(100).abs().lt(0.5).all()
+    assert participacao["pct_brancos"].dropna().between(0, 100).all()
+    assert participacao["pct_nulos"].dropna().between(0, 100).all()
+
+
+def test_indice_participacao_territorial_sem_dados_fica_none():
+    import pandas as pd
+
+    vazio = pd.DataFrame({"NR_ZONA": [1, 2]})
+    participacao = indice_participacao_territorial(vazio)
+    assert participacao["pct_abstencao"].isna().all()

@@ -81,6 +81,13 @@ clustering:
     - "pct_agua_encanada"
     - "pct_esgoto_adequado"
     - "pct_coleta_lixo"
+    - "pct_abstencao"
+    - "pct_brancos_nulos"
+    - "pct_populacao_15_24"
+    - "pct_populacao_60mais"
+    - "renda_per_capita_aprox"
+    - "pct_sem_banheiro"
+    - "pct_esgoto_a_ceu_aberto"
 
 # Abordagem de Maslow (secao "Abordagem de Maslow" do produto).
 #

@@ -117,6 +117,24 @@ def grafico_comparativo_concorrentes(matriz: pd.DataFrame, coluna_territorio: st
     return _aplicar_layout(fig, "Comparativo com concorrentes por territorio")
 
 
+def grafico_participacao_territorial(territorial: pd.DataFrame, coluna_territorio: str, top_n: int = 20) -> go.Figure:
+    """Barras agrupadas de % abstencao e % brancos+nulos por territorio -
+    os N territorios com maior abstencao (onde o indicador e mais util:
+    aponta onde a mobilizacao/participacao esta mais fraca)."""
+    dados = territorial.dropna(subset=["pct_abstencao"]).nlargest(top_n, "pct_abstencao").iloc[::-1]
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=dados["pct_abstencao"], y=dados[coluna_territorio].astype(str), orientation="h",
+        name="% abstencao", marker_color=DIVERGENTE[0],
+    ))
+    fig.add_trace(go.Bar(
+        x=dados["pct_brancos_nulos"], y=dados[coluna_territorio].astype(str), orientation="h",
+        name="% brancos+nulos", marker_color=CATEGORICA[1],
+    ))
+    fig.update_layout(barmode="group")
+    return _aplicar_layout(fig, f"Participacao territorial - maior abstencao (top {top_n})", altura=max(400, top_n * 24))
+
+
 def grafico_delta_rivais(delta_df: pd.DataFrame, coluna_territorio: str) -> go.Figure:
     """Barras divergentes: delta de votos (candidato - rival) por
     territorio, para cada rival. Azul = candidato a frente, vermelho =

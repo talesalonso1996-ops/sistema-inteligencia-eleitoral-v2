@@ -206,21 +206,27 @@ def desempenho_territorial(
 
 
 def enriquecer_com_comparecimento_abstencao(
-    territorial: pd.DataFrame, candidatura: Candidatura, nivel: str
+    territorial: pd.DataFrame, codigo_municipio_tse: int | None, cargo: str, nivel: str
 ) -> pd.DataFrame:
-    """Adiciona comparecimento/abstencao/brancos/nulos ao dataframe
-    territorial, quando o arquivo de detalhe por secao estiver disponivel."""
+    """Adiciona comparecimento/QT_APTOS/abstencao/brancos/nulos ao dataframe
+    territorial, quando o arquivo de detalhe por secao estiver disponivel
+    (hoje so existe para 2024 - cargos/anos sem esse arquivo, ou cargos
+    estaduais sem municipio, degradam graciosamente para colunas None, nunca
+    inventando um valor).
+
+    Aceita `codigo_municipio_tse`/`cargo` diretamente (em vez de receber a
+    Candidatura inteira) para poder ser chamada tambem de dentro de rotinas
+    cacheadas (`@st.cache_data`) que ja trabalham com esses campos crus."""
+    territorial = territorial.copy()
     detalhe = _carregar_detalhe_secao()
     if detalhe is None:
-        territorial["comparecimento"] = None
-        territorial["abstencoes"] = None
-        territorial["votos_brancos"] = None
-        territorial["votos_nulos"] = None
+        for col in ("comparecimento", "QT_APTOS", "abstencoes", "votos_brancos", "votos_nulos"):
+            territorial[col] = None
         return territorial
 
     detalhe_mun = detalhe[
-        (detalhe["CD_MUNICIPIO"] == candidatura.codigo_municipio_tse)
-        & (detalhe["DS_CARGO"].str.upper() == candidatura.cargo.upper())
+        (detalhe["CD_MUNICIPIO"] == codigo_municipio_tse)
+        & (detalhe["DS_CARGO"].str.upper() == cargo.upper())
     ]
     coluna_origem = None
     if nivel == "NR_ZONA":
@@ -232,19 +238,42 @@ def enriquecer_com_comparecimento_abstencao(
         detalhe_mun = detalhe_mun.assign(NR_SECAO_COMPOSTA=secao_composta(detalhe_mun))
         coluna_origem = "NR_SECAO_COMPOSTA"
     if coluna_origem is None or coluna_origem not in detalhe_mun.columns:
-        territorial["comparecimento"] = None
-        territorial["abstencoes"] = None
-        territorial["votos_brancos"] = None
-        territorial["votos_nulos"] = None
+        for col in ("comparecimento", "QT_APTOS", "abstencoes", "votos_brancos", "votos_nulos"):
+            territorial[col] = None
         return territorial
 
     agregado = detalhe_mun.groupby(coluna_origem, as_index=False).agg(
         comparecimento=("QT_COMPARECIMENTO", "sum"),
+        QT_APTOS=("QT_APTOS", "sum"),
         abstencoes=("QT_ABSTENCOES", "sum"),
         votos_brancos=("QT_VOTOS_BRANCOS", "sum"),
         votos_nulos=("QT_VOTOS_NULOS", "sum"),
     )
     return territorial.merge(agregado, left_on=nivel, right_on=coluna_origem, how="left")
+
+
+def indice_participacao_territorial(territorial: pd.DataFrame) -> pd.DataFrame:
+    """A partir das colunas ja adicionadas por
+    enriquecer_com_comparecimento_abstencao, calcula os percentuais
+    (comparecimento/abstencao sobre o eleitorado apto; brancos/nulos sobre
+    quem compareceu) - "protesto"/rejeicao territorial, um indicador que
+    ja era carregado internamente mas nunca chegava a tela ou a nenhuma
+    analise estatistica."""
+    out = territorial.copy()
+
+    def _coluna(nome: str) -> pd.Series:
+        return out[nome] if nome in out.columns else pd.Series(pd.NA, index=out.index, dtype="Float64")
+
+    aptos = _coluna("QT_APTOS").replace(0, pd.NA)
+    comparecimento = _coluna("comparecimento").replace(0, pd.NA)
+    out["pct_comparecimento"] = (100 * _coluna("comparecimento") / aptos).round(2)
+    out["pct_abstencao"] = (100 * _coluna("abstencoes") / aptos).round(2)
+    out["pct_brancos"] = (100 * _coluna("votos_brancos") / comparecimento).round(2)
+    out["pct_nulos"] = (100 * _coluna("votos_nulos") / comparecimento).round(2)
+    out["pct_brancos_nulos"] = (out["pct_brancos"].fillna(0) + out["pct_nulos"].fillna(0)).where(
+        out["pct_brancos"].notna() | out["pct_nulos"].notna()
+    )
+    return out
 
 
 def indice_concentracao_hhi(territorial: pd.DataFrame, coluna_votos: str = "votos_candidato") -> float:

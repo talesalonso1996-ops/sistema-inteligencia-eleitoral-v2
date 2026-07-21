@@ -20,6 +20,21 @@ def test_carregar_perfil_economico_sao_paulo(candidatura_sp):
     assert perfil.tendencia in {"crescimento", "estavel", "retracao"}
 
 
+def test_carregar_perfil_economico_expoe_clt_e_taxa_atividade(candidatura_sp):
+    """vinculos_clt_total/estabelecimentos_total ja estavam no parquet local
+    (rais_municipio_2023_BR.parquet) mas nunca eram lidos - agora alimentam
+    2 novos indicadores: % de formalizacao CLT e taxa de atividade
+    empresarial (estabelecimentos ativos / cadastrados)."""
+    perfil = carregar_perfil_economico_municipio(candidatura_sp)
+    assert perfil.vinculos_clt_total is not None
+    assert perfil.estabelecimentos_total is not None
+    assert perfil.vinculos_clt_total <= perfil.vinculos_ativos_total * 1.01  # CLT e subconjunto de vinculos ativos
+    assert 0 <= perfil.pct_formalizacao_clt <= 100
+    assert 0 <= perfil.taxa_atividade_empresarial <= 100
+    # estabelecimentos ativos nao pode superar o total cadastrado
+    assert perfil.estabelecimentos_ativos <= perfil.estabelecimentos_total
+
+
 def test_classificar_tendencia_limites():
     assert _classificar_tendencia(saldo=10_000, vinculos_ativos=100_000) == "crescimento"
     assert _classificar_tendencia(saldo=-10_000, vinculos_ativos=100_000) == "retracao"

@@ -89,10 +89,18 @@ def variaveis_demografia(setores_de_interesse: set[str]) -> pd.DataFrame:
     soma_ponderada = sum(df[col] * meio for col, meio in _FAIXAS_ETARIAS_MEIO.items())
     soma_faixas = df[list(_FAIXAS_ETARIAS_MEIO.keys())].sum(axis=1)
     df["idade_media_aprox"] = (soma_ponderada / soma_faixas).round(1)
+    # Faixas isoladas (o resto das 11 faixas de V01031-41 e descartado apos
+    # o calculo de idade_media_aprox acima) - "jovem" usa a faixa mais
+    # proxima disponivel no Censo (15-19 + 20-24 = V01034+V01035); nao ha
+    # faixa exata para "vota a partir de 16 anos", aproximacao documentada
+    # (decisao do usuario, ver plano Fase 5).
+    df["pct_populacao_15_24"] = (100 * (df["V01034"] + df["V01035"]) / soma_faixas).round(2)
+    df["pct_populacao_60mais"] = (100 * (df["V01040"] + df["V01041"]) / soma_faixas).round(2)
 
-    resultado = df[["CD_setor", "populacao_total", "pct_masculino", "pct_feminino", "idade_media_aprox"]].rename(
-        columns={"CD_setor": "CD_SETOR"}
-    )
+    resultado = df[[
+        "CD_setor", "populacao_total", "pct_masculino", "pct_feminino", "idade_media_aprox",
+        "pct_populacao_15_24", "pct_populacao_60mais",
+    ]].rename(columns={"CD_setor": "CD_SETOR"})
     write_cache("demographic_analysis", key, resultado)
     return resultado
 
@@ -238,7 +246,18 @@ def variaveis_domicilio(setores_de_interesse: set[str]) -> pd.DataFrame:
     total_lixo = df[colunas_lixo].sum(axis=1)
     df["pct_coleta_lixo"] = (100 * (df["V00397"] + df["V00398"]) / total_lixo).round(2)
 
-    resultado = df[["CD_SETOR", "pct_agua_encanada", "pct_esgoto_adequado", "pct_coleta_lixo"]]
+    # Categorias desagregadas do proprio bucket de esgoto acima (descartadas
+    # ate agora apos o calculo de pct_esgoto_adequado) - marcadores diretos
+    # de privacao, em vez de um "inadequado" generico: V00316 e ausencia
+    # total de banheiro/sanitario; V00313+V00314 e esgoto lancado direto em
+    # vala/rio/lago/mar (risco ambiental e de saude, nao so "inadequado").
+    df["pct_sem_banheiro"] = (100 * df["V00316"] / total_esgoto).round(2)
+    df["pct_esgoto_a_ceu_aberto"] = (100 * (df["V00313"] + df["V00314"]) / total_esgoto).round(2)
+
+    resultado = df[[
+        "CD_SETOR", "pct_agua_encanada", "pct_esgoto_adequado", "pct_coleta_lixo",
+        "pct_sem_banheiro", "pct_esgoto_a_ceu_aberto",
+    ]]
     write_cache("demographic_analysis", key, resultado)
     return resultado
 
@@ -299,12 +318,21 @@ def perfil_demografico_do_territorio(
     cada territorio (bairro/distrito/zona), a partir do perfil por setor
     dos locais de votacao que caem naquele territorio."""
     base = pontos_com_setor.merge(perfil_por_setor, on="CD_SETOR", how="left")
+    if "renda_media_responsavel" in base.columns and "n_moradores" in base.columns:
+        # renda_media_responsavel e por RESPONSAVEL pelo domicilio, nao por
+        # pessoa - n_moradores (V06002) ja era carregado por variaveis_renda
+        # e descartado antes de chegar aqui; aproxima renda por habitante.
+        base["renda_per_capita_aprox"] = (
+            base["renda_media_responsavel"] * base["n_responsaveis_com_rendimento"]
+            / base["n_moradores"].replace(0, pd.NA)
+        )
     variaveis = [
         "pct_masculino", "pct_feminino", "idade_media_aprox", "pct_branca",
         "pct_preta", "pct_parda", "pct_preta_parda", "pct_amarela", "pct_indigena",
-        "pct_alfabetizado_15mais", "renda_media_responsavel",
+        "pct_alfabetizado_15mais", "renda_media_responsavel", "renda_per_capita_aprox",
         "pct_domicilios_chefia_feminina", "pct_agua_encanada",
-        "pct_esgoto_adequado", "pct_coleta_lixo",
+        "pct_esgoto_adequado", "pct_coleta_lixo", "pct_populacao_15_24", "pct_populacao_60mais",
+        "pct_sem_banheiro", "pct_esgoto_a_ceu_aberto",
     ]
     variaveis = [v for v in variaveis if v in base.columns]
 

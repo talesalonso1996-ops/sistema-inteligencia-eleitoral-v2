@@ -5,6 +5,7 @@ from src.demographic_analysis import agregados_populacionais_municipio
 
 _COLUNAS_PERCENTUAIS_NOVAS = [
     "pct_domicilios_chefia_feminina", "pct_agua_encanada", "pct_esgoto_adequado", "pct_coleta_lixo",
+    "pct_populacao_15_24", "pct_populacao_60mais", "pct_sem_banheiro", "pct_esgoto_a_ceu_aberto",
 ]
 
 
@@ -18,6 +19,25 @@ def test_variaveis_parentesco_domicilio_ficam_em_0_100(base_territorio_sp, colun
     valores = base_territorio_sp[coluna].dropna()
     assert not valores.empty, f"{coluna} deveria ter pelo menos um valor nao nulo na amostra de teste"
     assert (valores >= 0).all() and (valores <= 100).all()
+
+
+def test_renda_per_capita_aprox_sempre_menor_que_renda_media_responsavel(base_territorio_sp):
+    """renda_per_capita_aprox usa n_moradores (mais pessoas por domicilio
+    que responsaveis) - deve ficar sempre abaixo da renda media do
+    RESPONSAVEL pelo domicilio."""
+    assert "renda_per_capita_aprox" in base_territorio_sp.columns
+    comparaveis = base_territorio_sp.dropna(subset=["renda_per_capita_aprox", "renda_media_responsavel"])
+    assert not comparaveis.empty
+    assert (comparaveis["renda_per_capita_aprox"] <= comparaveis["renda_media_responsavel"]).all()
+
+
+def test_faixas_etarias_isoladas_coerentes_com_idade_media(base_territorio_sp):
+    """pct_populacao_15_24 e pct_populacao_60mais sao faixas do MESMO
+    calculo que ja produz idade_media_aprox (V01031-41) - nao podem, juntas,
+    ultrapassar 100% da populacao do territorio."""
+    df = base_territorio_sp.dropna(subset=["pct_populacao_15_24", "pct_populacao_60mais"])
+    assert not df.empty
+    assert (df["pct_populacao_15_24"] + df["pct_populacao_60mais"] <= 100.01).all()
 
 
 def test_agregados_populacionais_municipio_dedup_por_local_antes_de_somar():

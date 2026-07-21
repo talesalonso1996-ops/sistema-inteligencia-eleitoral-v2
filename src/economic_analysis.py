@@ -39,6 +39,10 @@ class PerfilEconomicoMunicipio:
     desligamentos_2024: int | None
     tendencia: str  # "crescimento" | "estavel" | "retracao" | "indisponivel"
     disponivel: bool
+    vinculos_clt_total: int | None = None
+    estabelecimentos_total: int | None = None
+    pct_formalizacao_clt: float | None = None  # % dos vinculos ativos que sao CLT
+    taxa_atividade_empresarial: float | None = None  # % dos estabelecimentos cadastrados que estao ativos
     limitacoes: str = (
         "RAIS Estabelecimentos e CAGED tem granularidade de MUNICIPIO, nao de "
         "distrito/zona/bairro - por isso sao exibidos como contexto economico "
@@ -120,6 +124,8 @@ def carregar_perfil_economico_municipio(candidatura: Candidatura) -> PerfilEcono
 
     vinculos_ativos = int(linha_rais["vinculos_ativos_total"].iloc[0]) if not linha_rais.empty else None
     estabelecimentos_ativos = int(linha_rais["estabelecimentos_ativos"].iloc[0]) if not linha_rais.empty else None
+    vinculos_clt = int(linha_rais["vinculos_clt_total"].iloc[0]) if not linha_rais.empty else None
+    estabelecimentos_total = int(linha_rais["estabelecimentos_total"].iloc[0]) if not linha_rais.empty else None
     saldo = int(linha_caged["saldo_caged_2024"].iloc[0]) if not linha_caged.empty else None
     admissoes = int(linha_caged["admissoes_2024"].iloc[0]) if not linha_caged.empty else None
     desligamentos = int(linha_caged["desligamentos_2024"].iloc[0]) if not linha_caged.empty else None
@@ -128,6 +134,15 @@ def carregar_perfil_economico_municipio(candidatura: Candidatura) -> PerfilEcono
         _classificar_tendencia(saldo, vinculos_ativos)
         if saldo is not None and vinculos_ativos is not None
         else "indisponivel"
+    )
+
+    pct_formalizacao_clt = (
+        round(100 * vinculos_clt / vinculos_ativos, 2)
+        if vinculos_clt is not None and vinculos_ativos else None
+    )
+    taxa_atividade_empresarial = (
+        round(100 * estabelecimentos_ativos / estabelecimentos_total, 2)
+        if estabelecimentos_ativos is not None and estabelecimentos_total else None
     )
 
     resultado = PerfilEconomicoMunicipio(
@@ -139,6 +154,10 @@ def carregar_perfil_economico_municipio(candidatura: Candidatura) -> PerfilEcono
         desligamentos_2024=desligamentos,
         tendencia=tendencia,
         disponivel=True,
+        vinculos_clt_total=vinculos_clt,
+        estabelecimentos_total=estabelecimentos_total,
+        pct_formalizacao_clt=pct_formalizacao_clt,
+        taxa_atividade_empresarial=taxa_atividade_empresarial,
     )
     write_cache("economic_analysis", key, pd.DataFrame([resultado.__dict__]))
     return resultado

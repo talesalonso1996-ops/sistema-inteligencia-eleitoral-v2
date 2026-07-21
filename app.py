@@ -66,6 +66,7 @@ from src.electoral_metrics import (
     desempenho_territorial,
     enriquecer_com_comparecimento_abstencao,
     indice_concentracao_hhi,
+    indice_participacao_territorial,
     resultado_geral,
 )
 from src.excel_exporter import exportar_excel
@@ -308,14 +309,29 @@ def _carregar_demografia(
         return pd.DataFrame(), pd.DataFrame()
     perfil_setor = perfil_demografico_por_setor(setores)
     perfil_territorio = perfil_demografico_do_territorio(_enriquecido, perfil_setor, nivel)
+    # Comparecimento/abstencao/brancos/nulos (por secao, so existe para 2024
+    # - ver enriquecer_com_comparecimento_abstencao) mesclados ANTES do
+    # groupby por secao_id, usando a mesma chave composta (zona+secao) que a
+    # funcao ja sabe casar - cada secao_id corresponde a exatamente 1
+    # NR_SECAO_COMPOSTA, entao "first" no groupby abaixo preserva o valor
+    # sem ambiguidade.
+    enriquecido_part = _enriquecido
+    if "NR_ZONA" in _enriquecido.columns and "NR_SECAO" in _enriquecido.columns:
+        enriquecido_part = enriquecer_com_comparecimento_abstencao(
+            _enriquecido.assign(NR_SECAO_COMPOSTA=secao_composta(_enriquecido)),
+            municipio_tse, cargo, "NR_SECAO_COMPOSTA",
+        )
     # "first" para local_votacao_id: todo secao_id pertence a exatamente um
     # local_votacao_id (predio), entao nao ha ambiguidade - preservado aqui
     # para uso como coluna de cluster na regressao (secoes do mesmo predio
     # nao sao observacoes independentes, ver _COLUNA_CLUSTER_REGRESSAO).
     agregacoes = {"votos_candidato": ("votos_candidato", "sum")}
-    if "local_votacao_id" in _enriquecido.columns and nivel != "local_votacao_id":
+    if "local_votacao_id" in enriquecido_part.columns and nivel != "local_votacao_id":
         agregacoes["local_votacao_id"] = ("local_votacao_id", "first")
-    votos_territorio = _enriquecido.groupby(nivel, as_index=False).agg(**agregacoes)
+    for col in ("comparecimento", "QT_APTOS", "abstencoes", "votos_brancos", "votos_nulos"):
+        if col in enriquecido_part.columns:
+            agregacoes[col] = (col, "first")
+    votos_territorio = enriquecido_part.groupby(nivel, as_index=False).agg(**agregacoes)
     total_validos = total_votos_validos_por_territorio(_vd, _enriquecido, nivel)
     base = (
         votos_territorio.merge(perfil_territorio, on=nivel, how="inner")
@@ -324,6 +340,8 @@ def _carregar_demografia(
     base["pct_votos_validos_territorio"] = (
         100 * base["votos_candidato"] / base["votos_validos_territorio"]
     ).round(2)
+    if "QT_APTOS" in base.columns:
+        base = indice_participacao_territorial(base)
     return perfil_setor, base
 
 
@@ -699,6 +717,16 @@ if secao == "Visao Geral":
                     f"{perfil_economico.saldo_caged_2024:+,}".replace(",", "."),
                     tom={"crescimento": "bom", "retracao": "ruim"}.get(perfil_economico.tendencia, "neutro"),
                 )
+                ce4, ce5 = st.columns(2)
+                _kpi(
+                    ce4, "% vinculos formais em CLT",
+                    f"{perfil_economico.pct_formalizacao_clt}%" if perfil_economico.pct_formalizacao_clt is not None else "n/d",
+                )
+                _kpi(
+                    ce5, "Taxa de atividade empresarial",
+                    f"{perfil_economico.taxa_atividade_empresarial}%" if perfil_economico.taxa_atividade_empresarial is not None else "n/d",
+                    "% dos estabelecimentos cadastrados que estao ativos",
+                )
                 st.plotly_chart(charts.grafico_perfil_economico_municipio(perfil_economico), use_container_width=True)
 
 # ============================================================ Concorrencia
@@ -765,7 +793,9 @@ elif secao == "Territorio":
         nivel = "CD_MUNICIPIO"
 
     terr = desempenho_territorial(candidatura, vc, vd, rd, nivel)
-    terr = enriquecer_com_comparecimento_abstencao(terr, candidatura, nivel)
+    terr = enriquecer_com_comparecimento_abstencao(
+        terr, candidatura.codigo_municipio_tse, candidatura.cargo, nivel
+    )
     hhi = indice_concentracao_hhi(terr)
     terr_class = zonas_de_disputa(terr, vd, rd, candidatura, nivel)
     indice_terr = calcular_indice_performance(terr_class, hhi)
@@ -791,6 +821,27 @@ elif secao == "Territorio":
             "distancia para o concorrente principal - pesos ajustaveis em config/indicators.yaml."
         )
         st.dataframe(indice_terr, use_container_width=True, height=380)
+
+    with st.container(border=True):
+        st.subheader("Participacao territorial (comparecimento/abstencao/brancos/nulos)")
+        _explicacao(
+            "Comparecimento e abstencao sao % sobre o eleitorado apto do territorio; "
+            "brancos e nulos sao % sobre quem compareceu - um proxy de protesto/rejeicao "
+            "que nao aparece em nenhuma outra analise. So disponivel para 2024 (o TSE "
+            "ainda nao publicou o arquivo de detalhe por secao para 2022 neste sistema)."
+        )
+        terr_participacao = indice_participacao_territorial(terr)
+        if terr_participacao["pct_abstencao"].notna().any():
+            st.plotly_chart(
+                charts.grafico_participacao_territorial(terr_participacao, nivel), use_container_width=True,
+            )
+            st.dataframe(
+                terr_participacao[[nivel, "pct_comparecimento", "pct_abstencao", "pct_brancos", "pct_nulos"]]
+                .sort_values("pct_abstencao", ascending=False),
+                use_container_width=True, height=300,
+            )
+        else:
+            st.info("Dado de comparecimento/abstencao indisponivel para esta candidatura.")
 
     with st.container(border=True):
         st.subheader("Delta contra os principais rivais, territorio a territorio")
