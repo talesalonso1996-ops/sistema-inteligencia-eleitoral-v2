@@ -109,6 +109,12 @@ tse:
     url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/detalhe_votacao_secao/detalhe_votacao_secao_2024.zip"
     observacao: "Arquivo original ja e nacional (zip contem detalhe_votacao_secao_2024_BRASIL.csv combinado)."
 
+  perfil_eleitor_secao:
+    descricao: "Perfil do eleitorado (genero/faixa etaria/grau de instrucao/cor-raca) por secao eleitoral. Baixado e convertido SOB DEMANDA por UF (ver src/uf_data_bootstrap.py) - nao ha arquivo_local fixo; o caminho e data/raw/perfil_eleitor_secao_{UF}.parquet (ja agregado por secao na conversao, o CSV original tem 1 linha por combinacao de genero x faixa etaria x instrucao x cor/raca x... - inviavel manter cru)."
+    fonte: "TSE - Portal de Dados Abertos (dadosabertos.tse.jus.br, dataset 'Eleitorado Atual')"
+    url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/perfil_eleitor_secao/perfil_eleitor_secao_ATUAL_{uf}.zip"
+    observacao: "IMPORTANTE - vintage: e um retrato do eleitorado registrado HOJE (arquivo 'ATUAL', atualizado mensalmente pelo TSE, ANO_ELEICAO vem como 9999 - sentinela de 'sem eleicao especifica'), NAO um retrato historico na data de nenhuma eleicao passada. Obitos, novos registros e mudancas de domicilio alteram a composicao ao longo do tempo - qualquer comparacao com resultado de uma eleicao anterior (2022/2024) e aproximada, nunca um 'match' exato. Verificado baixando o arquivo real da UF do Acre em 2026-07-21 antes de escrever qualquer parser (colunas confirmadas: SG_UF, CD_MUNICIPIO, NR_ZONA, NR_SECAO, DS_GENERO, DS_FAIXA_ETARIA, DS_GRAU_INSTRUCAO, DS_COR_RACA, QT_ELEITORES)."
+
 ibge:
   # Malha de setores censitarios/bairros (CD2022): sem entrada fixa aqui -
   # baixada por UF sob demanda (ver src/uf_data_bootstrap.py). Padrao de

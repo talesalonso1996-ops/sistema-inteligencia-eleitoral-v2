@@ -62,6 +62,12 @@ from src.demographic_analysis import (
     perfil_demografico_por_setor,
 )
 from src.economic_analysis import carregar_perfil_economico_municipio
+from src.electorate_profile import (
+    LIMITACAO_VINTAGE,
+    carregar_perfil_eleitorado_secao,
+    comparar_eleitorado_vs_votos_candidato,
+    perfil_eleitorado_por_territorio,
+)
 from src.electoral_metrics import (
     desempenho_territorial,
     enriquecer_com_comparecimento_abstencao,
@@ -422,6 +428,11 @@ def _carregar_demografia_estadual(
     return _carregar_demografia_estadual_generica(numero, uf, cargo, ano, turno, _enriquecido, _vd, "CD_MUNICIPIO")
 
 
+@st.cache_data(show_spinner=False)
+def _carregar_perfil_eleitorado_uf(uf: str) -> pd.DataFrame:
+    return carregar_perfil_eleitorado_secao(uf)
+
+
 st.sidebar.header("Selecione a disputa")
 
 _ANO_LABELS = {2024: "2024 - Eleicoes Municipais", 2022: "2022 - Eleicoes Gerais"}
@@ -633,7 +644,7 @@ st.markdown(
 _opcoes_secao = ["Visao Geral", "Concorrencia", "Territorio"]
 if not _eh_municipal:
     _opcoes_secao += ["Indicadores Estaduais"]
-_opcoes_secao += ["Geografia", "Demografia", "Estatistica Avancada", "Abordagem de Maslow"]
+_opcoes_secao += ["Geografia", "Demografia", "Perfil do Eleitorado (TSE)", "Estatistica Avancada", "Abordagem de Maslow"]
 if _eh_proporcional:
     _opcoes_secao += ["Detalhamento Proporcional"]
 if _permite_2o_turno:
@@ -1212,6 +1223,76 @@ elif secao == "Demografia":
                 perfil_setor.to_csv(index=False).encode("utf-8"),
                 file_name="perfil_demografico_por_setor.csv",
             )
+
+# =============================================== Perfil do Eleitorado (TSE)
+elif secao == "Perfil do Eleitorado (TSE)":
+    st.warning(LIMITACAO_VINTAGE)
+    _explicacao(
+        "Perfil do eleitorado (genero, faixa etaria, escolaridade) por secao eleitoral - "
+        "fonte TSE (Portal de Dados Abertos, dataset 'Eleitorado Atual'), DIFERENTE do Censo "
+        "IBGE usado na aba Demografia. Baixado e convertido sob demanda na primeira vez "
+        "(pode levar ate 1 minuto em UFs grandes, cacheado depois)."
+    )
+    with st.spinner(f"Baixando/convertendo perfil do eleitorado da UF {candidatura.uf}..."):
+        perfil_uf_eleitorado = _carregar_perfil_eleitorado_uf(candidatura.uf)
+
+    if perfil_uf_eleitorado.empty:
+        st.info("Dados de perfil do eleitorado indisponiveis para esta UF.")
+    else:
+        if _eh_municipal:
+            nivel_eleitorado = "NR_ZONA"
+            terr_eleitorado = desempenho_territorial(candidatura, vc, vd, rd, nivel_eleitorado)
+            perfil_terr_eleitorado = perfil_eleitorado_por_territorio(
+                perfil_uf_eleitorado, candidatura.codigo_municipio_tse, nivel_eleitorado
+            )
+        else:
+            nivel_eleitorado = "CD_MUNICIPIO"
+            terr_eleitorado = desempenho_territorial(candidatura, vc, vd, rd, nivel_eleitorado)
+            terr_eleitorado = terr_eleitorado.merge(
+                vd[["CD_MUNICIPIO", "NM_MUNICIPIO"]].drop_duplicates(), on="CD_MUNICIPIO", how="left"
+            )
+            perfil_terr_eleitorado = perfil_eleitorado_por_territorio(perfil_uf_eleitorado, None, nivel_eleitorado)
+
+        comparativo = comparar_eleitorado_vs_votos_candidato(perfil_terr_eleitorado, terr_eleitorado, nivel_eleitorado)
+        if comparativo.empty:
+            st.info("Nao foi possivel cruzar o perfil do eleitorado com o desempenho territorial.")
+        else:
+            total_eleitores = perfil_terr_eleitorado["qt_eleitores_total"].sum()
+            pct_jovens_uf = round(100 * perfil_terr_eleitorado["qt_eleitores_jovens"].sum() / total_eleitores, 2) if total_eleitores else None
+            pct_60mais_uf = round(100 * perfil_terr_eleitorado["qt_eleitores_60mais"].sum() / total_eleitores, 2) if total_eleitores else None
+            pct_superior_uf = round(100 * perfil_terr_eleitorado["qt_eleitores_superior"].sum() / total_eleitores, 2) if total_eleitores else None
+            pct_feminino_uf = round(100 * perfil_terr_eleitorado["qt_eleitores_feminino"].sum() / total_eleitores, 2) if total_eleitores else None
+
+            c1, c2, c3, c4 = st.columns(4)
+            _kpi(c1, "Eleitores 16-24 anos", f"{pct_jovens_uf}%" if pct_jovens_uf is not None else "n/d")
+            _kpi(c2, "Eleitores 60+ anos", f"{pct_60mais_uf}%" if pct_60mais_uf is not None else "n/d")
+            _kpi(c3, "Com ensino superior", f"{pct_superior_uf}%" if pct_superior_uf is not None else "n/d")
+            _kpi(c4, "Eleitorado feminino", f"{pct_feminino_uf}%" if pct_feminino_uf is not None else "n/d")
+
+            with st.container(border=True):
+                st.subheader("Perfil do eleitorado vs. desempenho do candidato, por territorio")
+                st.dataframe(
+                    comparativo.sort_values("votos_candidato", ascending=False),
+                    use_container_width=True, height=400,
+                )
+
+            with st.container(border=True):
+                st.subheader("Correlacao: perfil do eleitorado x desempenho territorial")
+                _explicacao(
+                    "So descritivo - NAO alimenta a regressao/clusterizacao da aba Estatistica "
+                    "Avancada, que usa exclusivamente variaveis do Censo IBGE."
+                )
+                variaveis_eleitorado = [
+                    "pct_eleitores_jovens", "pct_eleitores_60mais",
+                    "pct_eleitores_superior", "pct_eleitores_feminino",
+                ]
+                corr_eleitorado, issues_corr_eleitorado = correlacoes_com_votos(
+                    comparativo, "pct_votos_validos_territorio", variaveis_eleitorado
+                )
+                for issue in issues_corr_eleitorado:
+                    st.warning(issue.mensagem)
+                if not corr_eleitorado.empty:
+                    st.dataframe(corr_eleitorado, use_container_width=True)
 
 # ======================================================= Estatistica Avancada
 elif secao == "Estatistica Avancada":

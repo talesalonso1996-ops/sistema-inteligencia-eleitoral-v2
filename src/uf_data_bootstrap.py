@@ -58,6 +58,10 @@ def caminho_malha(tipo: str, uf: str) -> Path:
     return resolve_path("data/raw") / f"{uf.upper()}_{tipo}_CD2022.parquet"
 
 
+def caminho_perfil_eleitor_secao(uf: str) -> Path:
+    return resolve_path("data/raw") / f"perfil_eleitor_secao_{uf.upper()}.parquet"
+
+
 def _pasta_tmp() -> Path:
     pasta = resolve_path("data/cache/uf_download_tmp")
     pasta.mkdir(parents=True, exist_ok=True)
@@ -126,6 +130,86 @@ def _garantir_votacao_secao_uf(uf: str, ano: int = 2024) -> bool:
             (pasta_tmp / nome_csv).unlink(missing_ok=True)
 
 
+_FAIXAS_JOVEM = ("16 anos", "17 anos", "18 anos", "19 anos", "20 anos", "21 a 24 anos")
+_FAIXAS_60MAIS = (
+    "60 a 64 anos", "65 a 69 anos", "70 a 74 anos", "75 a 79 anos", "80 a 84 anos",
+    "85 a 89 anos", "90 a 94 anos", "95 a 99 anos", "100 anos ou mais",
+)
+_INSTRUCAO_SUPERIOR = ("SUPERIOR COMPLETO", "SUPERIOR INCOMPLETO")
+
+
+def _garantir_perfil_eleitor_secao_uf(uf: str) -> bool:
+    """Baixa e converte o perfil do eleitorado por secao (TSE, dataset
+    'Eleitorado Atual') - ja agregando por (CD_MUNICIPIO, NR_ZONA, NR_SECAO)
+    na propria conversao via DuckDB: o CSV original tem 1 linha por
+    combinacao de genero x estado civil x faixa etaria x instrucao x
+    cor/raca x... (~99MB so para o Acre, uma UF pequena) - manter isso cru
+    seria inviavel e desnecessario, ja que so precisamos de contagens
+    agregadas por secao. Faixas etarias/instrucao usadas nos agregados
+    verificadas contra um arquivo real (Acre) antes de escrever este SQL -
+    ver config/data_sources.yaml: tse.perfil_eleitor_secao."""
+    destino = caminho_perfil_eleitor_secao(uf)
+    if destino.exists():
+        return True
+
+    fonte = data_sources()["tse"]["perfil_eleitor_secao"]
+    url = fonte["url_padrao"].format(uf=uf.upper())
+    logger.info("Baixando perfil do eleitorado por secao da UF %s: %s", uf, url)
+    try:
+        conteudo = _baixar(url)
+    except Exception:
+        logger.exception("Falha ao baixar perfil do eleitorado para UF %s", uf)
+        return False
+
+    pasta_tmp = _pasta_tmp()
+    nome_csv = None
+    try:
+        with zipfile.ZipFile(io.BytesIO(conteudo)) as z:
+            candidatos = [n for n in z.namelist() if n.lower().endswith(".csv")]
+            if not candidatos:
+                logger.error("Nenhum CSV de perfil do eleitorado encontrado no zip da UF %s", uf)
+                return False
+            nome_csv = candidatos[0]
+            z.extract(nome_csv, pasta_tmp)
+        caminho_csv = (pasta_tmp / nome_csv).as_posix()
+
+        con = duckdb.connect()
+        con.execute("PRAGMA memory_limit='1800MB'")
+        con.execute("PRAGMA threads=4")
+        temp_dir = resolve_path("data/cache/duckdb_tmp")
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        con.execute(f"PRAGMA temp_directory='{temp_dir.as_posix()}'")
+
+        faixas_jovem_sql = ", ".join(f"'{f}'" for f in _FAIXAS_JOVEM)
+        faixas_60mais_sql = ", ".join(f"'{f}'" for f in _FAIXAS_60MAIS)
+        instrucao_superior_sql = ", ".join(f"'{i}'" for i in _INSTRUCAO_SUPERIOR)
+
+        tmp_out = destino.with_suffix(".tmp")
+        con.execute(f"""
+            COPY (
+                SELECT
+                    CD_MUNICIPIO, NR_ZONA, NR_SECAO,
+                    SUM(QT_ELEITORES) AS qt_eleitores_total,
+                    SUM(CASE WHEN DS_FAIXA_ETARIA IN ({faixas_jovem_sql}) THEN QT_ELEITORES ELSE 0 END) AS qt_eleitores_jovens,
+                    SUM(CASE WHEN DS_FAIXA_ETARIA IN ({faixas_60mais_sql}) THEN QT_ELEITORES ELSE 0 END) AS qt_eleitores_60mais,
+                    SUM(CASE WHEN DS_GRAU_INSTRUCAO IN ({instrucao_superior_sql}) THEN QT_ELEITORES ELSE 0 END) AS qt_eleitores_superior,
+                    SUM(CASE WHEN DS_GENERO = 'FEMININO' THEN QT_ELEITORES ELSE 0 END) AS qt_eleitores_feminino
+                FROM read_csv('{caminho_csv}', delim=';', header=true, quote='"',
+                    encoding='latin-1', ignore_errors=true)
+                GROUP BY CD_MUNICIPIO, NR_ZONA, NR_SECAO
+            ) TO '{tmp_out.as_posix()}' (FORMAT PARQUET, COMPRESSION ZSTD)
+        """)
+        tmp_out.rename(destino)
+        logger.info("Perfil do eleitorado por secao da UF %s convertido: %s", uf, destino)
+        return True
+    except Exception:
+        logger.exception("Falha ao converter perfil do eleitorado da UF %s", uf)
+        return False
+    finally:
+        if nome_csv:
+            (pasta_tmp / nome_csv).unlink(missing_ok=True)
+
+
 def _garantir_malha_tipo_uf(tipo: str, uf: str) -> bool:
     destino = caminho_malha(tipo, uf)
     if destino.exists():
@@ -175,6 +259,17 @@ def garantir_dados_uf(uf: str, ano: int = 2024) -> bool:
     o usuario ESCOLHE uma candidatura especifica para analisar (ver
     garantir_malha_uf, chamada por geographic_analysis.carregar_malha)."""
     return _garantir_votacao_secao_uf(uf, ano)
+
+
+@st.cache_resource(show_spinner=False)
+def garantir_perfil_eleitor_secao_uf(uf: str) -> bool:
+    """Garante o perfil do eleitorado por secao (TSE, dataset 'Eleitorado
+    Atual') em data/raw/, baixando e convertendo sob demanda na primeira
+    vez que o usuario abre a aba 'Perfil do Eleitorado' para aquela UF -
+    mesmo padrao de garantir_dados_uf/garantir_malha_uf. Best-effort:
+    ausencia degrada graciosamente (aba mostra "dados indisponiveis"),
+    nunca simula um perfil de eleitorado."""
+    return _garantir_perfil_eleitor_secao_uf(uf)
 
 
 @st.cache_resource(show_spinner=False)
