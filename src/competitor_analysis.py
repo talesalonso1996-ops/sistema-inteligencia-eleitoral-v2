@@ -317,3 +317,33 @@ def rivais_por_similaridade_eleitorado(
     resultado["territorios_maior_sobreposicao"] = sobreposicoes
 
     return resultado, issues
+
+
+def perfil_comparativo_dois_candidatos(
+    base_territorio_a: pd.DataFrame, base_territorio_b: pd.DataFrame, variaveis: list[str], top_n: int = 5,
+) -> pd.DataFrame:
+    """Compara o perfil demografico MEDIO dos redutos (top_n territorios por
+    votos) de 2 candidatos da MESMA disputa - Fase 5, item D (comparacao
+    lado a lado). So compara variaveis presentes nos dois lados (as bases
+    podem ter granularidades/niveis territoriais diferentes se os
+    candidatos forem de disputas com abrangencias distintas, mas o uso
+    esperado e sempre mesma disputa, mesma granularidade)."""
+    variaveis_disp = [
+        v for v in variaveis if v in base_territorio_a.columns and v in base_territorio_b.columns
+    ]
+    if not variaveis_disp or base_territorio_a.empty or base_territorio_b.empty:
+        return pd.DataFrame(columns=["variavel", "media_candidato_a", "media_candidato_b"])
+
+    top_a = base_territorio_a.nlargest(top_n, "votos_candidato")
+    top_b = base_territorio_b.nlargest(top_n, "votos_candidato")
+
+    linhas = []
+    for var in variaveis_disp:
+        media_a = top_a[var].mean()
+        media_b = top_b[var].mean()
+        linhas.append({
+            "variavel": var,
+            "media_candidato_a": round(float(media_a), 2) if pd.notna(media_a) else None,
+            "media_candidato_b": round(float(media_b), 2) if pd.notna(media_b) else None,
+        })
+    return pd.DataFrame(linhas)

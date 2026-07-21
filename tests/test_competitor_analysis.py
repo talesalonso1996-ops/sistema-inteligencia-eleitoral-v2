@@ -1,6 +1,11 @@
 import pandas as pd
 
-from src.competitor_analysis import delta_vs_rivais, matriz_candidato_territorio, rivais_por_similaridade_eleitorado
+from src.competitor_analysis import (
+    delta_vs_rivais,
+    matriz_candidato_territorio,
+    perfil_comparativo_dois_candidatos,
+    rivais_por_similaridade_eleitorado,
+)
 from src.vote_filtering import votos_nominais, votos_validos
 
 
@@ -56,3 +61,40 @@ def test_delta_vs_rivais_com_dados_reais(candidatura_sp, dados_disputa, ranking_
     delta = delta_vs_rivais(matriz, "NR_ZONA", candidatura_sp.nome_urna)
     rivais_na_matriz = set(matriz.columns) - {"NR_ZONA", candidatura_sp.nome_urna}
     assert set(delta["rival"].unique()) == rivais_na_matriz
+
+
+def test_perfil_comparativo_dois_candidatos_medias_batem_com_top_n():
+    base_a = pd.DataFrame({
+        "votos_candidato": [100, 90, 10, 5],
+        "renda_media_responsavel": [1000, 2000, 3000, 4000],
+    })
+    base_b = pd.DataFrame({
+        "votos_candidato": [50, 40],
+        "renda_media_responsavel": [500, 700],
+    })
+    comparativo = perfil_comparativo_dois_candidatos(base_a, base_b, ["renda_media_responsavel"], top_n=2)
+    assert len(comparativo) == 1
+    linha = comparativo.iloc[0]
+    assert linha["variavel"] == "renda_media_responsavel"
+    assert linha["media_candidato_a"] == 1500.0  # media dos top 2 (100,90) -> renda 1000,2000
+    assert linha["media_candidato_b"] == 600.0  # media dos 2 unicos (500,700)
+
+
+def test_perfil_comparativo_dois_candidatos_ignora_variaveis_ausentes():
+    base_a = pd.DataFrame({"votos_candidato": [10], "renda_media_responsavel": [1000]})
+    base_b = pd.DataFrame({"votos_candidato": [10]})  # sem renda_media_responsavel
+    comparativo = perfil_comparativo_dois_candidatos(base_a, base_b, ["renda_media_responsavel"], top_n=1)
+    assert comparativo.empty
+
+
+def test_perfil_comparativo_dois_candidatos_com_dados_reais(base_territorio_sp):
+    """Usa a mesma base (Prefeito SP) para os dois lados - so garante que
+    a funcao roda de ponta a ponta com um dataframe real, com as mesmas
+    variaveis ja usadas no resto do projeto."""
+    from conftest import VARIAVEIS_DEMOGRAFICAS
+
+    comparativo = perfil_comparativo_dois_candidatos(
+        base_territorio_sp, base_territorio_sp, VARIAVEIS_DEMOGRAFICAS, top_n=5,
+    )
+    assert not comparativo.empty
+    assert (comparativo["media_candidato_a"] == comparativo["media_candidato_b"]).all()

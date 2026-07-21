@@ -50,6 +50,7 @@ from src.competitor_analysis import (
     concorrentes_diretos,
     delta_vs_rivais,
     matriz_candidato_territorio,
+    perfil_comparativo_dois_candidatos,
     ranking_disputa,
     ranking_partidos,
     rivais_por_similaridade_eleitorado,
@@ -472,6 +473,7 @@ if cargo:
         turno = st.sidebar.radio("Turno", [1, 2], format_func=lambda t: f"{t}o turno", horizontal=True, key="v2_turno")
 
 candidatura_guiada = None
+cand_opcoes: dict = {}
 if cargo:
     with st.spinner("Buscando candidatos..."):
         candidatos = _buscar_candidatos_guiado(ano, cargo, uf, municipio_codigo, turno)
@@ -542,8 +544,21 @@ st.sidebar.markdown(
     f"- Candidato: {alvo.nome_urna} ({alvo.numero}) - {alvo.partido_sigla}\n"
     f"- Abrangencia: {'Municipal' if alvo.codigo_municipio_tse is not None else 'Estadual (piloto)'}"
 )
+
+candidatura_b_selecionada = None
+if not veio_do_fallback and cand_opcoes:
+    st.sidebar.checkbox("Comparar com outro candidato (mesma disputa)", key="v2_modo_comparacao")
+    if st.session_state.get("v2_modo_comparacao"):
+        cand_opcoes_b = {k: c for k, c in cand_opcoes.items() if c.numero != alvo.numero}
+        if cand_opcoes_b:
+            cand_label_b = st.sidebar.selectbox("Candidato B", list(cand_opcoes_b.keys()), key="v2_candidato_b")
+            candidatura_b_selecionada = cand_opcoes_b[cand_label_b]
+        else:
+            st.sidebar.info("Nenhum outro candidato disponivel nesta disputa.")
+
+_numero_b = candidatura_b_selecionada.numero if candidatura_b_selecionada is not None else None
 _assinatura_selecao = (
-    alvo.ano_eleicao, alvo.uf, alvo.codigo_municipio_tse, alvo.cargo, alvo.turno, alvo.numero,
+    alvo.ano_eleicao, alvo.uf, alvo.codigo_municipio_tse, alvo.cargo, alvo.turno, alvo.numero, _numero_b,
 )
 _ja_gerado_para_esta_selecao = st.session_state.get("v2_selecao_gerada") == _assinatura_selecao
 
@@ -571,6 +586,13 @@ with st.spinner(
             ano, cargo, uf, municipio_codigo, turno, alvo.numero
         )
 
+candidatura_b = vc_b = None
+if candidatura_b_selecionada is not None:
+    with st.spinner(f"Carregando dados do candidato B ({candidatura_b_selecionada.nome_urna})..."):
+        candidatura_b, vc_b, _, _ = _carregar_dados_candidatura_v2(
+            ano, cargo, uf, municipio_codigo, turno, candidatura_b_selecionada.numero
+        )
+
 _escopo_atual = resolver_escopo(
     candidatura.ano_eleicao, candidatura.cargo, uf=candidatura.uf,
     municipio=(candidatura.municipio if candidatura.codigo_municipio_tse is not None else None),
@@ -582,6 +604,7 @@ _permite_2o_turno = _escopo_atual.permite_segundo_turno
 
 rg = resultado_geral(candidatura, vd, rd)
 ranking = ranking_disputa(vd, rd)
+rg_b = resultado_geral(candidatura_b, vd, rd) if candidatura_b is not None else None
 st.session_state.setdefault("nivel_territorial", "NR_ZONA")
 
 
@@ -650,6 +673,8 @@ if _eh_proporcional:
     _opcoes_secao += ["Detalhamento Proporcional"]
 if _permite_2o_turno:
     _opcoes_secao += ["Comparacao de Turnos"]
+if candidatura_b is not None:
+    _opcoes_secao += ["Comparativo"]
 _opcoes_secao += ["Relatorio"]
 secao = st.sidebar.radio("Navegacao", _opcoes_secao)
 
@@ -1754,6 +1779,79 @@ elif secao == "Comparacao de Turnos":
             comp_turnos.detalhe_territorial.sort_values("delta_votos", ascending=False),
             use_container_width=True, height=400,
         )
+
+# =============================================================== Comparativo
+elif secao == "Comparativo":
+    _explicacao(
+        f"Comparacao lado a lado entre {candidatura.nome_urna} e {candidatura_b.nome_urna} - "
+        "mesma disputa (mesmo ano/cargo/UF/turno). Metricas gerais reaproveitam resultado_geral; "
+        "o perfil demografico dos redutos reaproveita o mesmo pipeline de Geografia/Demografia."
+    )
+    cA, cB = st.columns(2)
+    with cA, st.container(border=True):
+        st.markdown(f"### {candidatura.nome_urna} ({candidatura.numero})")
+        st.metric("Total de votos", _fmt(rg.total_votos))
+        st.metric("Colocacao geral", f"{rg.colocacao_geral}o de {rg.total_concorrentes}")
+        st.metric("% votos validos", f"{rg.pct_votos_validos}%")
+    with cB, st.container(border=True):
+        st.markdown(f"### {candidatura_b.nome_urna} ({candidatura_b.numero})")
+        st.metric("Total de votos", _fmt(rg_b.total_votos))
+        st.metric("Colocacao geral", f"{rg_b.colocacao_geral}o de {rg_b.total_concorrentes}")
+        st.metric("% votos validos", f"{rg_b.pct_votos_validos}%")
+
+    with st.spinner("Calculando perfil demografico dos redutos de cada candidato..."):
+        if _eh_municipal:
+            _, enriquecido_a_comp, _ = _carregar_geografia_secao(
+                candidatura.numero, candidatura.codigo_municipio_tse, candidatura.cargo,
+                candidatura.ano_eleicao, candidatura.turno, candidatura, vc,
+            )
+            _, base_territorio_a_comp = _carregar_demografia(
+                candidatura.numero, candidatura.codigo_municipio_tse, candidatura.cargo,
+                candidatura.ano_eleicao, candidatura.turno, enriquecido_a_comp, vd,
+            )
+            _, enriquecido_b_comp, _ = _carregar_geografia_secao(
+                candidatura_b.numero, candidatura_b.codigo_municipio_tse, candidatura_b.cargo,
+                candidatura_b.ano_eleicao, candidatura_b.turno, candidatura_b, vc_b,
+            )
+            _, base_territorio_b_comp = _carregar_demografia(
+                candidatura_b.numero, candidatura_b.codigo_municipio_tse, candidatura_b.cargo,
+                candidatura_b.ano_eleicao, candidatura_b.turno, enriquecido_b_comp, vd,
+            )
+        else:
+            _, enriquecido_a_comp, _ = _carregar_geografia_estadual(
+                candidatura.numero, candidatura.uf, candidatura.cargo,
+                candidatura.ano_eleicao, candidatura.turno, candidatura, vc,
+            )
+            _, base_territorio_a_comp = _carregar_demografia_estadual(
+                candidatura.numero, candidatura.uf, candidatura.cargo,
+                candidatura.ano_eleicao, candidatura.turno, enriquecido_a_comp, vd,
+            )
+            _, enriquecido_b_comp, _ = _carregar_geografia_estadual(
+                candidatura_b.numero, candidatura_b.uf, candidatura_b.cargo,
+                candidatura_b.ano_eleicao, candidatura_b.turno, candidatura_b, vc_b,
+            )
+            _, base_territorio_b_comp = _carregar_demografia_estadual(
+                candidatura_b.numero, candidatura_b.uf, candidatura_b.cargo,
+                candidatura_b.ano_eleicao, candidatura_b.turno, enriquecido_b_comp, vd,
+            )
+
+    if base_territorio_a_comp.empty or base_territorio_b_comp.empty:
+        st.info("Nao foi possivel montar o perfil demografico comparativo dos redutos.")
+    else:
+        with st.container(border=True):
+            st.subheader("Perfil demografico medio dos 5 maiores redutos de cada candidato")
+            comparativo_perfil = perfil_comparativo_dois_candidatos(
+                base_territorio_a_comp, base_territorio_b_comp, VARIAVEIS_DEMOGRAFICAS, top_n=5,
+            )
+            if comparativo_perfil.empty:
+                st.info("Sem variaveis demograficas em comum para comparar.")
+            else:
+                st.dataframe(
+                    comparativo_perfil.rename(columns={
+                        "media_candidato_a": candidatura.nome_urna, "media_candidato_b": candidatura_b.nome_urna,
+                    }),
+                    use_container_width=True, height=350,
+                )
 
 # ================================================================ Relatorio
 elif secao == "Relatorio" and not _eh_municipal:
