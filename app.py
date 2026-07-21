@@ -61,6 +61,7 @@ from src.demographic_analysis import (
     perfil_demografico_do_territorio,
     perfil_demografico_por_setor,
 )
+from src.candidate_assets import carregar_patrimonio_candidato, patrimonio_comparativo
 from src.economic_analysis import carregar_perfil_economico_municipio
 from src.electorate_profile import (
     LIMITACAO_VINTAGE,
@@ -739,6 +740,32 @@ if secao == "Visao Geral":
                     "% dos estabelecimentos cadastrados que estao ativos",
                 )
                 st.plotly_chart(charts.grafico_perfil_economico_municipio(perfil_economico), use_container_width=True)
+
+    with st.container(border=True):
+        st.subheader("Patrimonio declarado (TSE)")
+        _explicacao(
+            "Bens declarados pelo proprio candidato ao TSE no registro da candidatura - "
+            "autodeclarado, nao e uma auditoria patrimonial. Comparado aos 3 maiores rivais "
+            "da mesma disputa."
+        )
+        perfil_patrimonial = carregar_patrimonio_candidato(candidatura)
+        if not perfil_patrimonial.disponivel:
+            st.info("Bens declarados indisponiveis para este candidato.")
+        else:
+            pp1, pp2 = st.columns(2)
+            _kpi(pp1, "Valor total declarado", f"R$ {_fmt(perfil_patrimonial.valor_total_bens)}")
+            _kpi(pp2, "Itens declarados", str(perfil_patrimonial.n_itens_declarados))
+            if not perfil_patrimonial.top_bens.empty:
+                st.dataframe(
+                    perfil_patrimonial.top_bens, use_container_width=True,
+                    column_config={"valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f")},
+                )
+            comparativo_patrimonio = patrimonio_comparativo(candidatura, ranking, top_n=3)
+            if not comparativo_patrimonio.empty:
+                st.plotly_chart(
+                    charts.grafico_patrimonio_comparativo(comparativo_patrimonio), use_container_width=True,
+                )
+            st.caption(perfil_patrimonial.limitacoes)
 
 # ============================================================ Concorrencia
 elif secao == "Concorrencia":

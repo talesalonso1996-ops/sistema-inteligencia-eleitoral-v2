@@ -109,6 +109,12 @@ tse:
     url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/detalhe_votacao_secao/detalhe_votacao_secao_2024.zip"
     observacao: "Arquivo original ja e nacional (zip contem detalhe_votacao_secao_2024_BRASIL.csv combinado)."
 
+  bens_candidatos:
+    descricao: "Bens declarados por candidato (tipo, descricao, valor) - Brasil inteiro. Um parquet nacional por ano (data/raw/bem_candidato_{ANO}_BR.parquet, gerado por scripts/preparar_bem_candidato.py) - so as colunas SQ_CANDIDATO/DS_TIPO_BEM_CANDIDATO/DS_BEM_CANDIDATO/VR_BEM_CANDIDATO."
+    fonte: "TSE - Bens de candidatos (dadosabertos.tse.jus.br)"
+    url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/bem_candidato/bem_candidato_{ano}.zip"
+    observacao: "So identifica o candidato por SQ_CANDIDATO (NAO tem NR_CANDIDATO) - por isso consulta_cand_{ano}_BR.parquet precisou ganhar a coluna SQ_CANDIDATO (ver scripts/adicionar_sq_candidato.py) para permitir a juncao. VR_BEM_CANDIDATO vem com virgula decimal brasileira, ja convertido para DOUBLE na conversao."
+
   perfil_eleitor_secao:
     descricao: "Perfil do eleitorado (genero/faixa etaria/grau de instrucao/cor-raca) por secao eleitoral. Baixado e convertido SOB DEMANDA por UF (ver src/uf_data_bootstrap.py) - nao ha arquivo_local fixo; o caminho e data/raw/perfil_eleitor_secao_{UF}.parquet (ja agregado por secao na conversao, o CSV original tem 1 linha por combinacao de genero x faixa etaria x instrucao x cor/raca x... - inviavel manter cru)."
     fonte: "TSE - Portal de Dados Abertos (dadosabertos.tse.jus.br, dataset 'Eleitorado Atual')"
@@ -229,3 +235,5 @@ pacote_cloud:
     - "caged_saldo_2024_BR.parquet"
     - "parentesco_setores_BR.parquet"
     - "domicilio2_setores_BR.parquet"
+    - "bem_candidato_2022_BR.parquet"
+    - "bem_candidato_2024_BR.parquet"

@@ -347,6 +347,19 @@ def grafico_perfil_economico_municipio(perfil) -> go.Figure:
     return _aplicar_layout(fig, "Movimentacao de empregos formais (CAGED, municipio, 2024)", altura=380)
 
 
+def grafico_patrimonio_comparativo(comparativo: pd.DataFrame) -> go.Figure:
+    """Barras comparando o valor total de bens declarados do candidato
+    contra os principais rivais da mesma disputa (candidate_assets.
+    patrimonio_comparativo)."""
+    dados = comparativo.dropna(subset=["valor_total_bens"])
+    fig = go.Figure(go.Bar(
+        x=dados["nome_urna"].astype(str), y=dados["valor_total_bens"],
+        marker_color=COR_CANDIDATO,
+        text=dados["valor_total_bens"], texttemplate="R$ %{text:,.0f}", textposition="outside",
+    ))
+    return _aplicar_layout(fig, "Patrimonio declarado - candidato vs. principais rivais", altura=380)
+
+
 def grafico_pizza_votos_validos(rg) -> go.Figure:
     """Pizza simples: participacao do candidato nos votos validos da
     disputa vs. o restante."""
