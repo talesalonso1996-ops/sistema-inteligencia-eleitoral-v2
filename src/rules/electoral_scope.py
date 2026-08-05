@@ -167,6 +167,10 @@ _CARGOS_POR_ANO: dict[int, tuple[str, ...]] = {
         "PRESIDENTE", "GOVERNADOR", "SENADOR",
         "DEPUTADO FEDERAL", "DEPUTADO ESTADUAL", "DEPUTADO DISTRITAL",
     ),
+    # 2018: so os 4 cargos estaduais foram verificados contra consulta_cand_2018_PA.csv real
+    # (2026-08-04) - Presidente nao verificado nesta rodada, deixado de fora ate confirmar
+    # DS_ELEICAO/TP_ABRANGENCIA no arquivo BRASIL consolidado. Ver config/data_sources.yaml.
+    2018: ("GOVERNADOR", "SENADOR", "DEPUTADO FEDERAL", "DEPUTADO ESTADUAL"),
 }
 
 
