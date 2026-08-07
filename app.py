@@ -113,6 +113,7 @@ import src.maps as maps
 # autoavaliacao, independente de qualquer candidatura real do TSE. Ver
 # ETAPA1_ARQUITETURA.md.
 from src.indicators.candidate_indices import calcular_indices_candidato
+from src.indicators.candidate_performance_indices import calcular_indices_desempenho_real
 from src.profiles.candidate_archetype import classificar_arquetipo
 from src.questionnaire.candidate_questionnaire import (
     BaseEleitoral,
@@ -1530,6 +1531,49 @@ elif secao == "Concorrencia":
                             "delta_total_votos", "territorios_em_comum", "territorios_maior_sobreposicao"]],
                 use_container_width=True,
             )
+
+    with st.container(border=True):
+        st.subheader("Desempenho eleitoral real - candidato x rivais (IDP/IVE/IEC/QEC)")
+        _explicacao(
+            "4 indices calculados a partir do resultado eleitoral REAL de cada candidato na "
+            "mesma disputa - nunca uma estimativa ou percepcao subjetiva. IDP (Desempenho "
+            "Politico) e IEC (Eficiencia de Campanha): quanto maior, melhor. IVE "
+            "(Vulnerabilidade Eleitoral): quanto maior, PIOR (mais exposto). QEC (Qualidade da "
+            "Estrategia): mede a solidez/alcance das vitorias territoriais - tende a ficar "
+            "perto de zero em disputas proporcionais concorridas (muitos candidatos fortes), "
+            "onde 'dominar' um territorio com folga e raro mesmo para o 1o colocado - "
+            "ver metodologia completa em config/indicators.yaml."
+        )
+        if not rivais_sim.empty:
+            nivel_indices = "NR_ZONA" if _eh_municipal else "CD_MUNICIPIO"
+            nomes_radar = [candidatura.nome_urna]
+            indices_radar = [calcular_indices_desempenho_real(candidatura, vc, vd, rd, nivel_indices).valores()]
+            registro_por_numero = rd.drop_duplicates("numero").set_index("numero")
+            for linha in rivais_sim.itertuples():
+                registro_rival = (
+                    registro_por_numero.loc[int(linha.numero)]
+                    if int(linha.numero) in registro_por_numero.index else None
+                )
+                candidatura_rival = Candidatura(
+                    numero=int(linha.numero), nome_completo=linha.nome_urna, nome_urna=linha.nome_urna,
+                    cargo=candidatura.cargo, municipio=candidatura.municipio,
+                    codigo_municipio_tse=candidatura.codigo_municipio_tse, uf=candidatura.uf,
+                    ano_eleicao=candidatura.ano_eleicao, turno=candidatura.turno,
+                    partido_sigla=linha.partido_sigla,
+                    partido_nome=str(registro_rival["partido_nome"]) if registro_rival is not None else "",
+                    coligacao_federacao=str(registro_rival["coligacao_federacao"]) if registro_rival is not None else "",
+                    situacao_candidatura=str(registro_rival["situacao_candidatura"]) if registro_rival is not None else "",
+                    resultado_final=str(registro_rival["resultado_final"]) if registro_rival is not None else "",
+                    total_votos=int(linha.total_votos_rival), zonas_com_votos=int(linha.territorios_em_comum),
+                )
+                vc_rival = vd[vd["NR_VOTAVEL"] == candidatura_rival.numero]
+                indices_radar.append(
+                    calcular_indices_desempenho_real(candidatura_rival, vc_rival, vd, rd, nivel_indices).valores()
+                )
+                nomes_radar.append(linha.nome_urna)
+            st.plotly_chart(charts.grafico_radar_desempenho(nomes_radar, indices_radar), use_container_width=True)
+        else:
+            st.info("Precisa dos rivais por similaridade de base eleitoral (acima) para montar o comparativo.")
 
     with st.container(border=True):
         st.subheader("Ranking por partido")

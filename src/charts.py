@@ -420,3 +420,30 @@ def grafico_piramide_maslow(
 
     fig.update_layout(yaxis=dict(categoryorder="array", categoryarray=[labels_por_tier.get(t, t) for t in reversed(ordem_tiers)]))
     return _aplicar_layout(fig, "Piramide de Maslow - proxies demograficos e efeito estimado", altura=420)
+
+
+def grafico_radar_desempenho(
+    nomes_candidatos: list[str], indices_por_candidato: list[dict[str, float]],
+) -> go.Figure:
+    """Radar (scatterpolar) comparando candidato x rivais nos 4 indices
+    reais de desempenho eleitoral (IDP/IVE/IEC/QEC - ver
+    src/indicators/candidate_performance_indices.py). Cada `dict` em
+    `indices_por_candidato` vem de `IndicesDesempenhoReal.valores()` (chaves
+    fixas IDP/IVE/IEC/QEC, sempre 0-100, sempre dado real ja calculado -
+    nunca uma estimativa gerada so para o grafico).
+
+    Paleta CATEGORICA fixa (mesma ordem de cor por posicao, nunca ciclada) -
+    ate 8 candidatos (tamanho da paleta)."""
+    eixos = ["IDP", "IVE", "IEC", "QEC"]
+    fig = go.Figure()
+    for i, (nome, indices) in enumerate(zip(nomes_candidatos, indices_por_candidato)):
+        valores = [indices.get(eixo, 0.0) for eixo in eixos]
+        cor = CATEGORICA[i % len(CATEGORICA)]
+        fig.add_trace(go.Scatterpolar(
+            r=valores + [valores[0]], theta=eixos + [eixos[0]], name=nome,
+            line=dict(color=cor), fillcolor=cor, opacity=0.85, fill="toself",
+        ))
+    fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])))
+    return _aplicar_layout(
+        fig, "Desempenho eleitoral real - candidato x rivais (IDP/IVE/IEC/QEC)", altura=480,
+    )

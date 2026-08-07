@@ -232,3 +232,114 @@ piramide_maslow:
     demografica ao nivel da piramide que a literatura de ciencias sociais
     usa como proxy empirico mais proximo. Nenhum numero novo e calculado
     ou fabricado aqui.
+
+# Os 4 indices de desempenho eleitoral REAL (IDP/IVE/IEC/QEC) - ver
+# src/indicators/candidate_performance_indices.py. Diferente dos 20 indices
+# de config/weights.yaml (autoavaliacao de uma NOVA candidatura via
+# questionario), estes 4 sao calculados a partir de uma candidatura JA
+# DISPUTADA (dado eleitoral real do TSE - resultado, territorio,
+# concentracao) - funcionam identicamente para o candidato-alvo e para
+# qualquer rival da mesma disputa (mesmo vd/rd ja carregados, so troca o
+# filtro de NR_VOTAVEL), o que permite o radar comparativo candidato x
+# rivais. Mesmo padrao de pesos configuraveis/redistribuiveis dos indices
+# acima.
+
+indice_idp:
+  nome_completo: "Indice de Desempenho Politico"
+  pergunta: "Quao forte foi o resultado dentro da propria disputa?"
+  pesos:
+    colocacao_relativa: 0.40      # posicao no ranking da disputa, normalizada (1o = 100)
+    proximidade_eleicao: 0.35     # 100 se eleito; senao votos/votos_do_ultimo_eleito
+    forca_no_partido: 0.25        # % que o candidato representa do total do proprio partido
+
+  limites_classificacao:
+    excelente: 80
+    forte: 60
+    moderado: 40
+    fraco: 20
+    critico: 0
+
+  limitacoes_metodologicas: >
+    Mede desempenho RELATIVO dentro da disputa (colocacao, proximidade de
+    ser eleito, peso dentro do proprio partido) - nao mede popularidade,
+    aprovacao de gestao ou intencao de voto futura. "Forca no partido" pode
+    ficar artificialmente alta em legendas pequenas (poucos concorrentes) -
+    limitacao ja compartilhada com pct_candidato_sobre_partido em
+    src/electoral_metrics.py.
+
+indice_ive:
+  nome_completo: "Indice de Vulnerabilidade Eleitoral"
+  pergunta: "Quao exposta esta a base do candidato?"
+  nota_alta_e_pior: true  # mesma convencao ja usada em risco_reputacional/rejeicao_potencial (config/weights.yaml)
+  pesos:
+    concentracao_hhi: 0.35            # HHI da votacao entre territorios (0=disperso, 1=concentrado)
+    proximidade_rival_direto: 0.35    # quao perto (em votos) esta o concorrente mais proximo, acima ou abaixo
+    territorios_expostos: 0.30        # % dos territorios com voto classificados como disputa_acirrada/desvantagem
+
+  limites_classificacao:
+    critica: 80
+    alta: 60
+    moderada: 40
+    baixa: 20
+    minima: 0
+
+  limitacoes_metodologicas: >
+    "Territorios expostos" usa a mesma classificacao de
+    src/competitor_analysis.py:zonas_de_disputa (margem_relativa padrao de
+    15%) - sensivel a esse parametro. Vulnerabilidade territorial nao
+    implica necessariamente perda de mandato (cargos proporcionais elegem
+    por quociente partidario, nao so por votos individuais) - o indice mede
+    exposicao da BASE, nao probabilidade de derrota.
+
+indice_iec:
+  nome_completo: "Indice de Eficiencia de Campanha"
+  pergunta: "Quao bem convertida em voto foi a presenca territorial do candidato?"
+  pesos:
+    cobertura_do_universo: 0.50            # % do universo de municipios/territorios da disputa onde teve voto
+    consistencia_acima_da_propria_media: 0.50  # % dos territorios com voto que ficaram acima da propria media
+
+  limites_classificacao:
+    muito_eficiente: 80
+    eficiente: 60
+    mediano: 40
+    disperso: 20
+    pontual: 0
+
+  limitacoes_metodologicas: >
+    "Eficiencia" aqui e territorial (cobertura e consistencia), NAO
+    financeira - o SIET nao tem acesso a gasto de campanha declarado por
+    territorio, entao nao mede custo por voto. Reaproveita
+    src/state_scope_indicators.py:calcular_presenca_eleitoral sem alterar
+    sua logica.
+
+indice_qec:
+  nome_completo: "Indice de Qualidade da Estrategia"
+  pergunta: "Quando o candidato disputou um territorio, com que solidez venceu - e quao longe essa solidez alcancou?"
+  pesos:
+    margem_media_nos_dominios: 0.60       # margem media (ponderada por voto) nos territorios de "dominio"/"dominio_absoluto"
+    alcance_do_dominio: 0.40              # territorios dominados / universo total de municipios da disputa
+
+  limites_classificacao:
+    muito_solida: 80
+    solida: 60
+    moderada: 40
+    fragil: 20
+    inexistente: 0
+
+  limitacoes_metodologicas: >
+    Este indice NAO avalia a qualidade da DECISAO estrategica do candidato
+    (por que escolheu certo cargo/UF/territorio, adequacao ao adversario) -
+    isso exigiria conhecimento sobre intencao e contexto que o dado
+    eleitoral bruto nao contem, e seria julgamento subjetivo sobre a
+    pessoa, fora do escopo de um indice automatico (mesmo limite ja
+    aplicado a biografia/midia em outras partes do sistema). O que este
+    indice mede, de forma honesta e mais estreita, e a SOLIDEZ e o ALCANCE
+    das vitorias territoriais reais do candidato - um proxy observavel,
+    nao uma avaliacao da estrategia em si.
+    Achado real ao testar: em disputas PROPORCIONAIS concorridas (ex.:
+    Vereador, muitos candidatos fortes), "dominio" (margem >= 15% sobre o
+    maior rival NAQUELE territorio) e raro mesmo para o 1o colocado geral -
+    QEC pode ficar perto de zero (cobertura 0%, nao um valor baixo
+    calculado) nesses casos. Em disputas MAJORITARIAS (Prefeito,
+    Governador) o indice funciona como esperado. Isso e uma limitacao real
+    da metrica, nao um erro de calculo - documentada, nao escondida.
