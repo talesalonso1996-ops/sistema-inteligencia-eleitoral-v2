@@ -1035,7 +1035,7 @@ def _carregar_geografia_estadual(numero, uf, cargo, ano, turno, _candidatura: Ca
     estaduais/distritais, V2) - mesmo arquivo nacional de coordenadas e
     mesma malha por UF ja usados pelo caminho municipal, so sem filtrar
     para 1 municipio (ver src/geographic_analysis.py)."""
-    coords = carregar_coordenadas_uf(uf)
+    coords = carregar_coordenadas_uf(uf, ano)
     pontos = juntar_votos_com_coordenadas(_vc, coords)
     enriquecido, avisos = atribuir_setor_e_bairro_uf(pontos, uf)
     return pontos, enriquecido, avisos
@@ -1049,7 +1049,7 @@ def _carregar_geografia_estadual_secao(numero, uf, cargo, ano, turno, _candidatu
     caminho municipal (_geo_secao), so calculada para a UF inteira antes
     de filtrar para o municipio escolhido (reaproveita a mesma malha ja
     baixada, sem download adicional)."""
-    coords = carregar_coordenadas_uf(uf)
+    coords = carregar_coordenadas_uf(uf, ano)
     pontos = juntar_votos_com_coordenadas_secao(_vc, coords)
     enriquecido, avisos = atribuir_setor_e_bairro_uf(pontos, uf)
     return pontos, enriquecido, avisos

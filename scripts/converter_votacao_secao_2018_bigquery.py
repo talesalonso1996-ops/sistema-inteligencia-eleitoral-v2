@@ -12,18 +12,17 @@ fallback estatico por src/uf_data_bootstrap.py, nao uma consulta ao vivo em
 producao (a credencial usada aqui e pessoal, nao pode ir para o deploy).
 
 LIMITACOES REAIS desta fonte (documentadas, nunca escondidas):
-- So votos NOMINAIS (sem legenda/branco/nulo), igual ao mirror munzona ja
-  usado para o comparativo historico - resultado_geral()/votos_validos()
-  ficam levemente diferentes de 2022/2024 para cargos proporcionais.
-- Sem NR_LOCAL_VOTACAO/NM_LOCAL_VOTACAO reais (a tabela nao guarda o local
-  de votacao, so zona+secao) - preenchidos com um sentinela explicito
-  (NR_LOCAL_VOTACAO=0, NM_LOCAL_VOTACAO='SEM DADO...') que nunca bate com
-  um codigo real de local, entao qualquer join geografico (coordenadas por
-  local de votacao) simplesmente nao encontra par para 2018 em vez de
-  juntar errado - a analise geografica/demografica (Censo) continua
-  indisponivel para 2018 mesmo depois deste script, porque coordenadas por
-  local de votacao sao uma fonte GEOGRAFICA separada que este dataset nao
-  cobre."""
+- So votos NOMINAIS (sem legenda/branco/nulo) - resultado_geral()/
+  votos_validos() ficam levemente diferentes de 2022/2024 para cargos
+  proporcionais.
+- Sem NR_LOCAL_VOTACAO/NM_LOCAL_VOTACAO reais (a tabela nao guarda qual
+  predio fisico agrupa secoes, so zona+secao) - por isso NR_SECAO e usado
+  como um NR_LOCAL_VOTACAO sintetico (cada secao vira seu proprio "local"),
+  consistente com a fonte de coordenadas usada em
+  scripts/converter_coordenadas_secao_2018_bigquery.py (tambem por secao,
+  nao por predio) - ver src/geographic_analysis.py
+  (_carregar_coordenadas_uf_2018) para o join que depende dessa
+  consistencia."""
 from __future__ import annotations
 
 import sys
@@ -38,8 +37,6 @@ _UFS = (
     "PA", "PB", "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO",
 )
 
-_LOCAL_VOTACAO_SENTINELA = 0
-_NM_LOCAL_VOTACAO_SENTINELA = "SEM DADO (2018 - fonte alternativa BigQuery, sem local de votacao)"
 
 
 def _lookup_municipios(pasta_raw: Path) -> pd.DataFrame:
@@ -90,8 +87,13 @@ def converter_uf(client: bigquery.Client, uf: str, mun_lookup: pd.Series, cand_l
     df["NM_MUNICIPIO"] = df["CD_MUNICIPIO"].map(mun_lookup)
     chave_cand = list(zip(df["sigla_uf"], df["_cargo_norm"], df["NR_VOTAVEL"]))
     df["NM_VOTAVEL"] = [cand_lookup.get(k, "NOME NAO ENCONTRADO NO REGISTRO 2018") for k in chave_cand]
-    df["NR_LOCAL_VOTACAO"] = _LOCAL_VOTACAO_SENTINELA
-    df["NM_LOCAL_VOTACAO"] = _NM_LOCAL_VOTACAO_SENTINELA
+    # NR_SECAO como NR_LOCAL_VOTACAO sintetico - ver nota metodologica no
+    # topo do arquivo (consistente com a fonte de coordenadas, tambem por
+    # secao).
+    df["NR_LOCAL_VOTACAO"] = df["NR_SECAO"]
+    df["NM_LOCAL_VOTACAO"] = (
+        "Secao " + df["NR_SECAO"].astype(str) + " (2018 - sem nome de local, so coordenada por secao)"
+    )
 
     colunas = [
         "NR_VOTAVEL", "NM_VOTAVEL", "DS_CARGO", "CD_MUNICIPIO", "NM_MUNICIPIO",

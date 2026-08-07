@@ -484,12 +484,59 @@ def normalizar_nome_municipio(texto: str) -> str:
     return _normalizar_nome(texto)
 
 
-def carregar_coordenadas_uf(uf: str) -> pd.DataFrame:
+def _caminho_coordenadas_secao_2018(uf: str) -> "Path":
+    from pathlib import Path
+
+    return resolve_path("data/raw") / f"coordenadas_secao_2018_{uf.upper()}.parquet"
+
+
+def _carregar_coordenadas_uf_2018(uf: str) -> pd.DataFrame:
+    """2018 nao tem o arquivo nacional eleitorado_local_votacao (que so
+    cobre o cadastro "atual" de locais de votacao) - usa a fonte
+    alternativa por SECAO (scripts/converter_coordenadas_secao_2018_bigquery.py,
+    dataset publico br_tse_eleicoes/local_secao). Cada SECAO vira o "local"
+    aqui (nao ha informacao de qual predio fisico agrupa secoes em 2018) -
+    NR_SECAO e mascarado como NR_LOCAL_VOTACAO para o resto do pipeline
+    (atribuir_setor_e_bairro_uf, clustering, regressao, Maslow) funcionar
+    sem nenhuma mudanca. Cobertura real ~87,5% das secoes nacionalmente -
+    as sem coordenada simplesmente nao aparecem aqui, nunca fabricadas."""
+    caminho = _caminho_coordenadas_secao_2018(uf)
+    colunas = ["CD_MUNICIPIO", "NM_MUNICIPIO", "NR_ZONA", "NR_LOCAL_VOTACAO",
+               "NM_LOCAL_VOTACAO", "NM_BAIRRO", "cep", "latitude", "longitude"]
+    if not caminho.exists():
+        logger.warning("Coordenadas de secao 2018 nao encontradas para UF %s: %s", uf, caminho)
+        return pd.DataFrame(columns=colunas)
+
+    con = duckdb.connect()
+    votacao_2018 = _caminho(f"data/raw/votacao_secao_2018_{uf.upper()}.parquet")
+    sql = f"""
+        SELECT DISTINCT
+            c.CD_MUNICIPIO, v.NM_MUNICIPIO,
+            c.NR_ZONA, c.NR_SECAO AS NR_LOCAL_VOTACAO,
+            'Secao ' || c.NR_SECAO || ' (2018 - sem nome de local, so coordenada por secao)' AS NM_LOCAL_VOTACAO,
+            CAST(NULL AS VARCHAR) AS NM_BAIRRO, CAST(NULL AS VARCHAR) AS cep,
+            c.latitude, c.longitude
+        FROM read_parquet('{_caminho(str(caminho))}') c
+        LEFT JOIN (SELECT DISTINCT CD_MUNICIPIO, NM_MUNICIPIO FROM read_parquet('{votacao_2018}')) v
+            ON c.CD_MUNICIPIO = v.CD_MUNICIPIO
+    """
+    return con.execute(sql).fetchdf()
+
+
+def carregar_coordenadas_uf(uf: str, ano: int = 2024) -> pd.DataFrame:
     """Como carregar_coordenadas_locais, mas para TODOS os municipios da UF
     de uma vez (cargos estaduais/distritais) - mesmo arquivo nacional
     (eleitorado_local_votacao), filtrado por SG_UF em vez de
     CD_MUNICIPIO. Inclui CD_MUNICIPIO/NM_MUNICIPIO no resultado (para
-    agregacao por municipio depois)."""
+    agregacao por municipio depois).
+
+    2018 usa uma fonte alternativa real (ver _carregar_coordenadas_uf_2018)
+    porque nao existe eleitorado_local_votacao para esse ano - o parametro
+    `ano` so importa para essa distincao, o resto do pipeline (join
+    espacial, demografia, clustering) e identico independente da fonte."""
+    if ano == 2018:
+        return _carregar_coordenadas_uf_2018(uf)
+
     key = cache_key("coordenadas_uf_v1", uf.upper())
     cached = read_cache("geographic_analysis", key)
     if cached is not None:

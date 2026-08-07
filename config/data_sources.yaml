@@ -101,12 +101,24 @@ eleicoes:
     #
     # LIMITACAO REAL que sobrevive mesmo com esta fonte: so voto NOMINAL (sem
     # legenda/branco/nulo) - resultado_geral()/votos_validos() ficam levemente
-    # diferentes de 2022/2024 para cargos proporcionais. Sem NR_LOCAL_VOTACAO/
-    # NM_LOCAL_VOTACAO reais tambem (preenchidos com sentinela explicito) - a
-    # analise geografica/demografica (Censo) continua indisponivel para 2018, ja
-    # que precisaria de coordenadas por local de votacao (existe uma fonte real
-    # para isso tambem - tabela local_secao do mesmo dataset, ~87,5% de cobertura
-    # nacional - mas isso e' trabalho futuro, nao feito ainda).
+    # diferentes de 2022/2024 para cargos proporcionais.
+    #
+    # GEOGRAFIA/DEMOGRAFIA (Censo IBGE) - TAMBEM RESOLVIDA: nao existe
+    # NR_LOCAL_VOTACAO real para 2018 (eleitorado_local_votacao so cobre o
+    # cadastro "atual"), mas a tabela local_secao do MESMO dataset (Base dos
+    # Dados/BigQuery) da coordenada real por (municipio, zona, secao) - ~87,5%
+    # de cobertura nacional. Extraida (scripts/converter_coordenadas_secao_2018_bigquery.py
+    # -> coordenadas_secao_2018_{UF}.parquet, 27 arquivos, 411.177 linhas) e
+    # publicada na mesma release. NR_SECAO e usado como NR_LOCAL_VOTACAO
+    # sintetico (cada secao vira seu proprio "local", nao ha info de qual
+    # predio fisico agrupa varias secoes em 2018) - por isso
+    # votacao_secao_2018_{UF}.parquet TAMBEM usa NR_SECAO em NR_LOCAL_VOTACAO
+    # (nao um sentinela fixo), consistencia essencial para o join em
+    # src/geographic_analysis.py (_carregar_coordenadas_uf_2018,
+    # carregar_coordenadas_uf(uf, ano=2018)). Validado end-to-end com
+    # Governador SP 2018 (Doria): 96,7% das secoes com coordenada resolvida
+    # para setor censitario real, regressao com variaveis do Censo rodando
+    # normalmente (ver tests/test_geographic_analysis_2018.py).
     votacao_secao_url: "https://cdn.tse.jus.br/estatistica/sead/odsele/votacao_secao/votacao_secao_2018_{uf}.zip"
     votacao_secao_arquivo: "votacao_secao_2018_{UF}.parquet"
     consulta_cand_url: "https://cdn.tse.jus.br/estatistica/sead/odsele/consulta_cand/consulta_cand_2018.zip"
