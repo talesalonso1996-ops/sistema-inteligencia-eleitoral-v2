@@ -84,9 +84,8 @@ class ResultadoComparativoHistorico:
     candidatura_comparavel: Candidatura | None
     territorial_atual: pd.DataFrame | None = None
     territorial_comparavel: pd.DataFrame | None = None
-    votos_totais_comparavel: int | None = None  # soma real de vc_comp - candidatura_comparavel.total_votos
-    # pode ficar em 0 quando o ano usa a fonte munzona (nao passa pela
-    # checagem de votacao_secao que preenche esse campo do dataclass).
+    votos_totais_comparavel: int | None = None  # soma real de vc_comp - fonte unica de verdade,
+    # preferida a candidatura_comparavel.total_votos mesmo quando os dois já concordam.
     comparativo_zonas: pd.DataFrame | None = None
     correlacao_territorial: float | None = None
     n_zonas_comuns: int = 0
