@@ -1,0 +1,432 @@
+# Pautas/areas de politica publica (secao 14.1 do briefing de expansao
+# SIET) e a competencia federativa real de cada uma - usada pelo "gate de
+# competencia do cargo" (secao 14.5: "Nenhuma proposta devera ser incluida
+# sem verificar a competencia do cargo analisado" - src/platforms/platform_builder.py).
+#
+# BASE LEGAL (real, nao estimada): a maior parte das areas de politica
+# social listadas aqui e "competencia comum" dos tres niveis de governo,
+# por forca do Art. 23 da Constituicao Federal de 1988 (saude, assistencia
+# social, habitacao, saneamento basico, educacao, cultura, meio ambiente,
+# combate a pobreza, entre outras). Isso e um achado REAL do desenho
+# federativo brasileiro, nao uma escolha de conveniencia deste sistema -
+# ver nota metodologica no fim deste arquivo.
+#
+# niveis_competencia: quais niveis de governo tem poder real de legislar
+# e/ou executar sobre a pauta - "municipal" | "distrital" | "estadual" |
+# "federal". DF acumula municipal+distrital (Art. 32 CF/88 - o DF nao pode
+# ser dividido em municipios, a Camara Legislativa do DF legisla sobre
+# materias tipicamente municipais E estaduais).
+#
+# orgaos_por_nivel: nome generico do orgao executor tipico em cada nivel -
+# usado por platform_builder.py para sugerir "orgao responsavel" de forma
+# coerente com o cargo analisado (um Vereador nao propoe um Ministerio
+# como orgao responsavel).
+
+pautas:
+  saude:
+    label: "Saude"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 23, II, CF/88 (competencia comum) + Lei 8.080/1990 (SUS, gestao compartilhada)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Saude"
+      distrital: "Secretaria de Saude do DF"
+      estadual: "Secretaria Estadual de Saude"
+      federal: "Ministerio da Saude"
+
+  educacao:
+    label: "Educacao"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 23, V e Art. 211, CF/88 (regime de colaboracao: municipio=infantil/fundamental, estado=fundamental/medio, uniao=ensino superior e diretrizes)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Educacao"
+      distrital: "Secretaria de Educacao do DF"
+      estadual: "Secretaria Estadual de Educacao"
+      federal: "Ministerio da Educacao"
+
+  seguranca_publica:
+    label: "Seguranca Publica"
+    categoria: "seguranca"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 144, CF/88 - Policia Federal/Rodoviaria/Ferroviaria Federal (federal); Policia Civil/Militar/Corpo de Bombeiros (estadual, e tambem competencia da Uniao no caso do DF); Guardas Municipais (municipal, protecao de bens/servicos/instalacoes - nao policiamento ostensivo pleno)"
+    limitacao: "Atuacao municipal e limitada a guarda municipal (GCM) - nao substitui policiamento ostensivo, que e estadual/federal."
+    orgaos_por_nivel:
+      municipal: "Guarda Civil Municipal / Secretaria Municipal de Seguranca (onde existir)"
+      distrital: "Secretaria de Seguranca Publica do DF"
+      estadual: "Secretaria Estadual de Seguranca Publica"
+      federal: "Ministerio da Justica e Seguranca Publica"
+
+  moradia:
+    label: "Moradia"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 23, IX, CF/88 (competencia comum: promover programas de construcao de moradias e melhoria das condicoes habitacionais)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Habitacao"
+      distrital: "Secretaria de Desenvolvimento Urbano e Habitacao do DF"
+      estadual: "Secretaria Estadual de Habitacao"
+      federal: "Ministerio das Cidades"
+
+  habitacao:
+    label: "Habitacao"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Mesma base de 'moradia' (Art. 23, IX, CF/88) - mantido como pauta separada por ser tratado assim no briefing."
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Habitacao"
+      distrital: "Secretaria de Desenvolvimento Urbano e Habitacao do DF"
+      estadual: "Secretaria Estadual de Habitacao"
+      federal: "Ministerio das Cidades"
+
+  saneamento:
+    label: "Saneamento Basico"
+    categoria: "infraestrutura"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 23, IX, CF/88 (competencia comum) + Lei 14.026/2020 (novo marco do saneamento - titularidade municipal, financiamento pode ser estadual/federal)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Saneamento / concessionaria municipal"
+      distrital: "CAESB (companhia de saneamento do DF)"
+      estadual: "Companhia estadual de saneamento"
+      federal: "Ministerio das Cidades"
+
+  mobilidade:
+    label: "Mobilidade Urbana"
+    categoria: "infraestrutura"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 30, V, CF/88 (transporte coletivo urbano e interesse local - competencia municipal) + Lei 12.587/2012 (Politica Nacional de Mobilidade Urbana)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Mobilidade/Transportes"
+      distrital: "Secretaria de Transporte e Mobilidade do DF"
+      estadual: "Secretaria Estadual de Transportes (rodovias estaduais, transporte metropolitano)"
+      federal: "Ministerio dos Transportes"
+
+  transporte:
+    label: "Transporte"
+    categoria: "infraestrutura"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Mesma base de 'mobilidade' - mantido como pauta separada por ser tratado assim no briefing."
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Transportes"
+      distrital: "Secretaria de Transporte e Mobilidade do DF"
+      estadual: "Secretaria Estadual de Transportes"
+      federal: "Ministerio dos Transportes"
+
+  emprego_renda:
+    label: "Emprego e Renda"
+    categoria: "economia"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Politica de emprego e majoritariamente federal (SINE, FAT, Lei 7.998/1990), com atuacao estadual/municipal em intermediacao de mao de obra e desenvolvimento economico local"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Trabalho/Desenvolvimento Economico"
+      distrital: "Secretaria de Trabalho do DF"
+      estadual: "Secretaria Estadual de Trabalho"
+      federal: "Ministerio do Trabalho e Emprego"
+
+  desenvolvimento_economico:
+    label: "Desenvolvimento Economico"
+    categoria: "economia"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Competencia comum de fomento economico - cada ente atua em escala propria (municipio=ambiente de negocios local, estado=industria/infraestrutura regional, uniao=politica macroeconomica)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Desenvolvimento Economico"
+      distrital: "Secretaria de Desenvolvimento Economico do DF"
+      estadual: "Secretaria Estadual de Desenvolvimento Economico"
+      federal: "Ministerio do Desenvolvimento, Industria e Comercio"
+
+  assistencia_social:
+    label: "Assistencia Social"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 23, II, CF/88 + Lei Organica da Assistencia Social (LOAS, Lei 8.742/1993) - SUAS, execucao predominantemente municipal, cofinanciamento estadual/federal"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Assistencia Social (CRAS/CREAS)"
+      distrital: "Secretaria de Desenvolvimento Social do DF"
+      estadual: "Secretaria Estadual de Assistencia Social"
+      federal: "Ministerio do Desenvolvimento Social"
+
+  combate_pobreza:
+    label: "Combate a Pobreza"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 23, X, CF/88 (competencia comum: combater as causas da pobreza e os fatores de marginalizacao)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Assistencia Social"
+      distrital: "Secretaria de Desenvolvimento Social do DF"
+      estadual: "Secretaria Estadual de Assistencia Social"
+      federal: "Ministerio do Desenvolvimento Social"
+
+  cultura:
+    label: "Cultura"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 23, III e V, CF/88 (competencia comum - proteger o patrimonio cultural e proporcionar acesso a cultura)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Cultura"
+      distrital: "Secretaria de Cultura do DF"
+      estadual: "Secretaria Estadual de Cultura"
+      federal: "Ministerio da Cultura"
+
+  esporte:
+    label: "Esporte"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 217, CF/88 (dever do Estado de fomentar praticas desportivas, sem exclusividade de ente)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Esportes"
+      distrital: "Secretaria de Esporte e Lazer do DF"
+      estadual: "Secretaria Estadual de Esportes"
+      federal: "Ministerio do Esporte"
+
+  turismo:
+    label: "Turismo"
+    categoria: "economia"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Competencia comum de fomento - forte atuacao municipal/estadual (atrativos locais/regionais) com politica nacional federal (Lei 11.771/2008)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Turismo"
+      distrital: "Secretaria de Turismo do DF"
+      estadual: "Secretaria Estadual de Turismo"
+      federal: "Ministerio do Turismo"
+
+  meio_ambiente:
+    label: "Meio Ambiente"
+    categoria: "sustentabilidade"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 23, VI e VII, CF/88 (competencia comum) - licenciamento ambiental distribuido por porte/impacto do empreendimento entre os 3 niveis (LC 140/2011)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Meio Ambiente"
+      distrital: "Secretaria de Meio Ambiente do DF"
+      estadual: "Secretaria Estadual de Meio Ambiente"
+      federal: "Ministerio do Meio Ambiente / IBAMA"
+
+  infraestrutura:
+    label: "Infraestrutura"
+    categoria: "infraestrutura"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Competencia comum, escala variavel por tipo de obra (via local=municipal, rodovia estadual=estadual, rodovia federal=federal)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Obras/Infraestrutura"
+      distrital: "Secretaria de Obras e Infraestrutura do DF"
+      estadual: "Secretaria Estadual de Infraestrutura"
+      federal: "Ministerio da Infraestrutura"
+
+  juventude:
+    label: "Juventude"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 227, CF/88 (dever do Estado, familia e sociedade com a juventude - competencia comum) + Estatuto da Juventude (Lei 12.852/2013)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Juventude"
+      distrital: "Secretaria de Juventude do DF"
+      estadual: "Secretaria Estadual de Juventude"
+      federal: "Secretaria Nacional de Juventude"
+
+  primeira_infancia:
+    label: "Primeira Infancia"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 30, VI, CF/88 (educacao infantil - competencia municipal prioritaria) + Marco Legal da Primeira Infancia (Lei 13.257/2016, competencia comum)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Educacao / Assistencia Social"
+      distrital: "Secretaria de Educacao do DF"
+      estadual: "Secretaria Estadual de Educacao"
+      federal: "Ministerio da Educacao / Ministerio do Desenvolvimento Social"
+
+  mulheres:
+    label: "Protecao as Mulheres"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Lei Maria da Penha (Lei 11.340/2006) - rede de protecao envolve os 3 niveis (delegacias especializadas=estadual, centros de referencia=municipal, politica nacional=federal)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Politicas para Mulheres"
+      distrital: "Secretaria da Mulher do DF"
+      estadual: "Secretaria Estadual de Politicas para Mulheres"
+      federal: "Ministerio das Mulheres"
+
+  idosos:
+    label: "Defesa dos Idosos"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 230, CF/88 (competencia comum) + Estatuto do Idoso (Lei 10.741/2003)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Assistencia Social"
+      distrital: "Secretaria de Desenvolvimento Social do DF"
+      estadual: "Secretaria Estadual de Assistencia Social"
+      federal: "Secretaria Nacional dos Direitos da Pessoa Idosa"
+
+  pessoas_com_deficiencia:
+    label: "Inclusao da Pessoa com Deficiencia"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Lei Brasileira de Inclusao (Lei 13.146/2015) - competencia comum, acessibilidade urbana e forte atribuicao municipal"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Pessoa com Deficiencia"
+      distrital: "Secretaria de Pessoa com Deficiencia do DF"
+      estadual: "Secretaria Estadual de Direitos Humanos"
+      federal: "Secretaria Nacional dos Direitos da Pessoa com Deficiencia"
+
+  empreendedorismo:
+    label: "Empreendedorismo"
+    categoria: "economia"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Competencia comum de fomento economico - Lei Geral da Micro e Pequena Empresa (LC 123/2006) e nacional, execucao local de simplificacao (ex.: alvara)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Desenvolvimento Economico"
+      distrital: "Secretaria de Desenvolvimento Economico do DF"
+      estadual: "Secretaria Estadual de Desenvolvimento Economico"
+      federal: "Ministerio do Desenvolvimento, Industria e Comercio"
+
+  tecnologia_inovacao:
+    label: "Tecnologia e Inovacao"
+    categoria: "economia"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 23, V, CF/88 (competencia comum sobre ciencia/tecnologia) + Marco Legal de CT&I (Lei 13.243/2016) - forte atuacao federal, com fomento estadual/municipal"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Ciencia e Tecnologia (onde existir) / Desenvolvimento Economico"
+      distrital: "Secretaria de Ciencia e Tecnologia do DF"
+      estadual: "Secretaria Estadual de Ciencia e Tecnologia"
+      federal: "Ministerio da Ciencia, Tecnologia e Inovacao"
+
+  transparencia:
+    label: "Transparencia"
+    categoria: "governanca"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Lei de Acesso a Informacao (Lei 12.527/2011) - aplicavel e exigivel nos 3 niveis de governo, cada ente responsavel pela propria transparencia"
+    orgaos_por_nivel:
+      municipal: "Controladoria Geral do Municipio"
+      distrital: "Controladoria Geral do DF"
+      estadual: "Controladoria Geral do Estado"
+      federal: "Controladoria Geral da Uniao"
+
+  participacao_popular:
+    label: "Participacao Popular"
+    categoria: "governanca"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 29, XII e Art. 204, II, CF/88 (cooperacao das associacoes representativas / participacao popular na gestao) - mecanismos existem em todos os niveis (conselhos, orcamento participativo, audiencias publicas)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Governo / Conselhos Municipais"
+      distrital: "Secretaria de Governo do DF"
+      estadual: "Secretaria Estadual de Governo"
+      federal: "Secretaria-Geral da Presidencia da Republica"
+
+  gestao_publica:
+    label: "Gestao Publica"
+    categoria: "governanca"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Interno a cada ente - cada nivel de governo e responsavel pela propria gestao administrativa (Art. 37, CF/88, principios da administracao publica aplicaveis a todos os entes)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Administracao/Gestao"
+      distrital: "Secretaria de Economia do DF"
+      estadual: "Secretaria Estadual de Administracao"
+      federal: "Ministerio da Gestao e da Inovacao em Servicos Publicos"
+
+  agricultura:
+    label: "Agricultura"
+    categoria: "producao_primaria"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 23, VIII, CF/88 (fomentar a producao agropecuaria - competencia comum) - politica agricola nacional e federal (Lei 8.171/1991), assistencia tecnica frequentemente municipal/estadual"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Agricultura"
+      distrital: "Secretaria de Agricultura do DF"
+      estadual: "Secretaria Estadual de Agricultura"
+      federal: "Ministerio da Agricultura e Pecuaria"
+
+  pesca:
+    label: "Pesca"
+    categoria: "producao_primaria"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Politica Nacional de Desenvolvimento Sustentavel da Aquicultura e da Pesca (Lei 11.959/2009) e federal, com atuacao estadual/municipal em municipios pesqueiros"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Agricultura e Pesca (onde relevante)"
+      distrital: "nao aplicavel (DF sem litoral/tradicao pesqueira relevante)"
+      estadual: "Secretaria Estadual de Pesca e Aquicultura"
+      federal: "Ministerio da Pesca e Aquicultura"
+
+  economia_criativa:
+    label: "Economia Criativa"
+    categoria: "economia"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Competencia comum de fomento economico/cultural - sem legislacao especifica unica, decorre da soma de Art. 23 (cultura) + Art. 23 (desenvolvimento economico)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Cultura / Desenvolvimento Economico"
+      distrital: "Secretaria de Cultura do DF"
+      estadual: "Secretaria Estadual de Cultura"
+      federal: "Ministerio da Cultura"
+
+  seguranca_alimentar:
+    label: "Seguranca Alimentar"
+    categoria: "seguridade_social"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Lei Organica de Seguranca Alimentar e Nutricional (Lei 11.346/2006, SISAN) - sistema descentralizado, execucao nos 3 niveis"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Assistencia Social / Agricultura"
+      distrital: "Secretaria de Desenvolvimento Social do DF"
+      estadual: "Secretaria Estadual de Desenvolvimento Social"
+      federal: "Ministerio do Desenvolvimento Social"
+
+  protecao_animal:
+    label: "Protecao Animal"
+    categoria: "sustentabilidade"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 225, par. 1, VII, CF/88 (vedar praticas que submetam animais a crueldade - competencia comum) - controle de zoonoses e tipicamente municipal"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Meio Ambiente / Centro de Controle de Zoonoses"
+      distrital: "Secretaria de Meio Ambiente do DF"
+      estadual: "Secretaria Estadual de Meio Ambiente"
+      federal: "Ministerio do Meio Ambiente"
+
+  regularizacao_fundiaria:
+    label: "Regularizacao Fundiaria"
+    categoria: "infraestrutura"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Art. 30, VIII, CF/88 (promover o adequado ordenamento territorial - competencia municipal) + Lei 13.465/2017 (Reurb, marco federal que autoriza e orienta a regularizacao executada localmente)"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Habitacao/Urbanismo"
+      distrital: "Secretaria de Desenvolvimento Urbano e Habitacao do DF"
+      estadual: "Secretaria Estadual de Habitacao (apoio a municipios)"
+      federal: "Ministerio das Cidades"
+
+  defesa_civil:
+    label: "Defesa Civil"
+    categoria: "seguranca"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Lei 12.608/2012 (Politica Nacional de Protecao e Defesa Civil) - execucao local (COMDEC municipal), coordenacao estadual (CEDEC) e nacional (federal)"
+    orgaos_por_nivel:
+      municipal: "Coordenadoria Municipal de Defesa Civil (COMDEC)"
+      distrital: "Corpo de Bombeiros Militar do DF / Defesa Civil do DF"
+      estadual: "Coordenadoria Estadual de Defesa Civil (CEDEC)"
+      federal: "Ministerio da Integracao e do Desenvolvimento Regional"
+
+  mudancas_climaticas:
+    label: "Mudancas Climaticas"
+    categoria: "sustentabilidade"
+    niveis_competencia: [municipal, distrital, estadual, federal]
+    base_legal: "Politica Nacional sobre Mudanca do Clima (Lei 12.187/2009) - federal, com planos de adaptacao locais (municipal/estadual) cada vez mais comuns"
+    orgaos_por_nivel:
+      municipal: "Secretaria Municipal de Meio Ambiente"
+      distrital: "Secretaria de Meio Ambiente do DF"
+      estadual: "Secretaria Estadual de Meio Ambiente"
+      federal: "Ministerio do Meio Ambiente e Mudanca do Clima"
+
+# ---------------------------------------------------------------------
+# NOTA METODOLOGICA (leia antes de usar isto para "bloquear" uma proposta)
+#
+# As 35 pautas acima cobrem majoritariamente politicas sociais/de bem-estar,
+# area em que o desenho constitucional brasileiro (Art. 23, CF/88) atribui
+# COMPETENCIA COMUM aos tres niveis de governo - por isso quase todas tem
+# niveis_competencia = [municipal, distrital, estadual, federal]. Isto NAO
+# e uma simplificacao de conveniencia deste sistema: e o desenho real da
+# federacao brasileira para esta familia de temas (diferente, por exemplo,
+# de politica monetaria ou relacoes exteriores, que sao competencia federal
+# exclusiva e nao aparecem nesta lista).
+#
+# Na pratica, isso significa que o "gate de competencia" em
+# platform_builder.py raramente vai BLOQUEAR uma combinacao cargo x pauta
+# desta lista - o valor real do gate esta em (1) documentar a base legal
+# de cada pauta de forma rastreavel, citavel, nao inventada, e (2) sugerir
+# o ORGAO RESPONSAVEL certo para o nivel do cargo analisado (um Vereador
+# nao propoe "Ministerio da Saude" como orgao responsavel por uma UBS de
+# bairro). Cargos verdadeiramente incompativeis com uma pauta desta lista
+# sao a excecao, nao a regra - e quando existem (ex.: "pesca" no Distrito
+# Federal), estao marcados explicitamente no campo `orgaos_por_nivel`.

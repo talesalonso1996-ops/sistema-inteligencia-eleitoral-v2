@@ -1,0 +1,207 @@
+# SIET — Expansão para Sistema de Inteligência Eleitoral, Territorial e Programática
+## Etapa 1 — Arquitetura, Metodologia, Modelo de Dados, Indicadores, Fluxo, Estrutura de Pastas
+
+Documento de referência para a expansão do sistema `sistema_inteligencia_eleitoral_v2` (SIET) rumo ao escopo completo descrito no briefing (candidato + território + pautas + análise integrada, com 4 modos de uso e 3 relatórios de ~50 páginas). Este documento assume — e não repete — o inventário real do repositório já levantado (30 módulos em `src/`, `app.py` monolítico com navegação por `st.radio`, config em 3 YAMLs, dados em Parquet consultados via DuckDB, sem banco relacional, 19 arquivos de teste).
+
+---
+
+## 1. Visão geral: o que já existe vs. o que é novo
+
+O briefing descreve um sistema de ~40 seções. Rodar tudo isso do zero seria regredir um sistema que já tem 5.500+ linhas de código testado, rodando com dado real do TSE/IBGE/RAIS-CAGED. A leitura correta da Seção 4 do próprio briefing ("preservação do sistema existente") é: **os módulos 13 (território) e boa parte do 22 (partidos) já existem e são reais** — o que falta é (a) o **Modo 1 — Candidato** (questionário + índices de perfil, hoje inexistente), (b) o **Modo 3 — Pautas/Plataforma** (hoje inexistente), (c) o **Modo 4 — Integração** (cruzar 1+2+3), e (d) a **camada de relatórios de 50 páginas** (hoje há só um `report_generator.py` de relatório executivo curto).
+
+| Módulo do briefing | Situação real |
+|---|---|
+| Território (seç. 13) | **Já existe**, maduro: `potential_index.py`, `state_scope_indicators.py`, `clustering.py`, `demographic_analysis.py`, `economic_analysis.py`, `regression_models.py`, `correlation_analysis.py`, `maslow_analysis.py`, `geographic_analysis.py`, `maps.py`. Não recriar — só expor via um novo modo de navegação "território sem candidato". |
+| Rivais (seç. 17) | **Já existe** como `rivais_por_similaridade_eleitorado()` em `competitor_analysis.py` (correlação de base eleitoral por território) — é dado real de disputas já ocorridas. O briefing pede também rivais para candidaturas hipotéticas (sem disputa ainda ocorrida) — isso é novo, específico do Modo 1. |
+| Partidos (seç. 22) | **Parcialmente existe**: `proportional_analysis.py` (ranking de federações, quociente) e o achado real desta sessão (ex.: PSB elegeu 0 de 9 em MG) já cobrem boa parte. Falta o "Índice de Compatibilidade Partidária" ligado ao questionário do candidato. |
+| Candidato / questionário / 20 índices / arquétipos (seç. 8, 11, 12) | **Novo.** Não existe hoje nenhum módulo de auto-avaliação/questionário. |
+| Pautas / plataforma (seç. 10, 14) | **Novo.** |
+| Matriz candidato×território×pauta (seç. 15) | **Novo**, mas consome saída dos três blocos acima — só faz sentido depois que eles existirem. |
+| Clusters territoriais (seç. 18) | **Já existe** (`clustering.py`, K-Means sobre 18 variáveis demográficas, com `k_fixo: 10`) — o briefing pede também clusters "programáticos" (por pauta), que são novos. |
+| Projeções/cenários (seç. 19) | **Parcialmente existe**: `regression_models.py` tem regressão linear/logística real. Cenários Monte Carlo/bayesianos documentados na Seção 19 são novos. |
+| 3 relatórios de ~50 páginas (seç. 28) | **Novo** — o `report_generator.py` atual gera um relatório executivo, não os 3 relatórios completos do briefing. Este trabalho reaproveita o *padrão visual* já validado nesta sessão (os relatórios SIET em HTML/PDF feitos para candidatos reais), não o `report_generator.py` (que é HTML simples via Jinja-like f-strings, sem o design system). |
+
+**Conclusão da Etapa 1**: não é uma reescrita. É uma expansão em 3 frentes novas (Candidato, Pautas, Integração) que **consomem** a frente já existente (Território), mais uma camada de relatório de 50 páginas que reaproveita o design system já construído nesta sessão (não o `report_generator.py` legado, que continua existindo e funcionando para quem já o usa).
+
+---
+
+## 2. Adaptações necessárias à árvore de pastas do briefing (e por quê)
+
+O briefing (Seção 30) propõe nomes de pasta que **colidem** com módulos existentes:
+
+- `src/clusters/` colidiria com o módulo já existente `src/clustering.py` — Python não permite um pacote e um módulo com nomes que se sobrepõem na resolução de import da mesma forma seguindeste caso não é idêntico, mas para evitar qualquer ambiguidade e manter 100% de compatibilidade retroativa com todo `from src.clustering import ...` já usado em `app.py` e nos testes, **não criamos `src/clusters/`** — a segmentação territorial continua em `clustering.py`; o que é novo (clusters programáticos, por pauta) entra em `src/platforms/policy_clusters.py`.
+- `src/maps/` colidiria da mesma forma com `src/maps.py` (usado por `app.py`). Mantido `maps.py` como está; funcionalidades novas de mapa (aderência candidato-pauta-território) entram como funções novas dentro do próprio `maps.py`, seguindo o padrão de função `mapa_*()` já existente.
+- `src/reports/` **não colide** (não existe hoje um pacote com esse nome — existe `report_generator.py`, um módulo). Usamos `src/reports/` como pacote novo para os 3 relatórios longos, e mantemos `report_generator.py` intocado para quem já depende dele.
+- `src/parties/` **não colide** (`proportional_analysis.py` é o nome existente). Em vez de duplicar, `src/parties/party_compatibility.py` é novo e **importa** `proportional_analysis.py` em vez de reescrevê-lo.
+- `pages/NN_nome.py` (multipage nativo do Streamlit) — hoje `app.py` é monolítico com navegação por `st.radio`, não pelo mecanismo de pastas `pages/`. Migrar para `pages/` agora é uma mudança estrutural grande e arriscada (a Seção 4 do briefing proíbe regressão). **Decisão**: as páginas novas (questionário, pautas, plano de ação) entram como **novas seções no mesmo `st.radio`** de `app.py`, no padrão já usado para "Comparativo" e "Detalhamento Proporcional" (seções condicionais). A migração para `pages/` fica documentada como item de arquitetura futura, não decidida agora sem o usuário confirmar (é uma mudança de UX visível, não points técnico).
+
+Pastas do briefing **sem colisão, criadas como propostas**:
+`src/questionnaire/`, `src/indicators/`, `src/profiles/`, `src/public_policies/`, `src/platforms/`, `src/candidates/` (síntese do Modo 1, junta questionnaire+indicators+profiles), `src/rivals/` (rivais hipotéticos, complementa `competitor_analysis.py`), `src/projections/` (Monte Carlo/cenários, complementa `regression_models.py`), `src/reports/`.
+
+---
+
+## 3. Modelo de dados — decisão: continuar file-based, sem banco relacional
+
+O briefing (Seção 31) pede "entidades" de banco de dados. A base já roda com **Parquet + DuckDB como motor de consulta** (não como storage persistente) e um cache em disco por hash (`src/utils.py:cache_key/read_cache/write_cache`) — arquitetura testada com sucesso nesta sessão para volumes de centenas de MB por UF/ano.
+
+**Decisão**: quando a etapa de persistência for implementada (ver nota de escopo no fim da Seção 7 — ainda não construída nesta Etapa 1), as novas entidades (Questionário, Resposta, Análise, Pauta, Proposta, Cluster Programático, Cenário) devem virar **Parquet em `data/processed/questionnaire/`, `data/processed/analyses/`, `data/processed/platforms/`** — mesma convenção de `data/raw/` e `data/cache/` já existentes — em vez de introduzir PostgreSQL agora. Motivo: (1) zero infraestrutura nova para o usuário rodar (continua funcionando em Colab/local/Streamlit Cloud sem servidor de banco), (2) mesma stack (DuckDB) já sabe fazer JOIN entre parquets de análise e parquets de dado eleitorial/territorial sem overhead de ORM, (3) volume de dado (uma linha por análise/questionário) é ordens de magnitude menor que os dados eleitorais — SQLite/Postgres seriam over-engineering nesta fase. PostgreSQL fica registrado aqui como opção futura possível (ex.: uma chave nova `persistencia: parquet | postgres` em `config/settings.yaml`, hoje inexistente) — não implementado agora, e não escrito no config antes de ter uso real, pela mesma razão que a Seção 4 do briefing pede para não regredir: não criar "abstração além do necessário".
+
+**Entidades da Etapa 1 (Modo 1 — Candidato) — hoje só como dataclasses Python em memória (o "schema Parquet" abaixo é o desenho para quando a persistência for implementada, não um arquivo `.parquet` que já existe):**
+
+```
+RespostaQuestionario  (1 por análise de candidato)
+  id_analise: str (uuid)
+  timestamp: datetime
+  secao_1_identificacao: dict   # cargo, UF, municipio-base, partido, disputou_antes
+  secao_2_trajetoria: dict
+  secao_3_base_eleitoral: dict
+  secao_4_comunicacao: dict
+  secao_5_recursos: dict
+  secao_6_posicionamento: dict
+  secao_7_objetivos: dict
+
+IndicesCandidato  (1 por análise, calculado a partir de RespostaQuestionario)
+  id_analise: str
+  <20 campos, um por índice da Seção 11, cada um com nota 0-100 + classificação>
+  indice_geral_prontidao: float
+  cobertura_pct: float   # % de indices calculados com dado completo (mesmo padrao de IDP/IVE/IEC/QEC)
+
+ArquetipoCandidato  (1 por análise)
+  id_analise: str
+  arquetipo_principal: str
+  arquetipos_secundarios: list[str]
+  evidencias: list[str]
+  cargos_compativeis: list[str]
+```
+
+---
+
+## 4. Metodologia — a distinção que organiza tudo
+
+Esta é a decisão metodológica mais importante da expansão, e por isso abre sua própria seção em vez de ficar perdida em um parágrafo de índice.
+
+O SIET, até aqui, calcula índices a partir de **dado eleitoral e censitário oficial verificável** (IDP/IVE/IEC/QEC de sessões anteriores, Índice de Performance, Índice de Capilaridade). São fatos sobre o mundo, com fonte.
+
+Os **20 índices do candidato (Seção 11)** são estruturalmente diferentes: nascem de um **questionário de autoavaliação categórica** (nenhuma/inicial/intermediária/consolidada, etc.). Isso não é um defeito a esconder — é o que a Seção 8 do próprio briefing pede. Mas exige rótulo diferente em todo lugar (UI, relatório, docstring): estes são **escores normativos de autoavaliação estruturada**, não medições objetivas. A tabela de conversão categoria→número (ex.: "nenhuma"=0, "inicial"=33, "intermediária"=66, "consolidada"=100) é uma **regra de pontuação declarada e configurável** (`config/weights.yaml`), no mesmo espírito de transparência dos pesos já usados em `indicators.yaml` — nunca apresentada como fato aferido externamente.
+
+Regra prática adotada em todo o código novo: toda função que calcule um índice do candidato recebe e retorna também `cobertura_pct` (quantas perguntas de fato foram respondidas) e nunca preenche pergunta não respondida com estimativa — mesmo padrão já usado no IEC (30% de cobertura, sinalizado como não comparável) nesta sessão.
+
+---
+
+## 5. Os 20 índices do candidato (Seção 11) — fórmula e insumo real
+
+Todos 0–100, mesma faixa de classificação da Seção 11 do briefing (crítico/baixo/moderado/alto/muito alto = 0-19/20-39/40-59/60-79/80-100). Pesos em `config/weights.yaml`, redistribuídos quando um componente não foi respondido (mesmo padrão de `potential_index.py`).
+
+| # | Índice | Insumo (seção do questionário) | Natureza |
+|---|---|---|---|
+| 1 | Conhecimento Público (ICP) | 8.4 conhecimento espontâneo + seguidores | direto |
+| 2 | Capilaridade Territorial (ICT) | 8.3 nº bairros/cidades com presença + estrutura | direto |
+| 3 | Mobilização (IMob) | 8.3 apoiadores mobilizáveis + capacidade de eventos | direto |
+| 4 | Estrutura Política (IEP) | 8.3 relacionamento com lideranças/vereadores/prefeitos/deputados | direto |
+| 5 | Estrutura Operacional (IEO) | 8.5 equipe/transporte/locais/audiovisual | direto |
+| 6 | Capacidade Financeira Legal (ICF) | 8.5 investimento legal + arrecadação | direto |
+| 7 | Comunicação (ICom) | 8.4 oratória/vídeo/entrevista/debate/resposta a crítica | direto (média) |
+| 8 | Presença Digital (IPD) | 8.4 seguidores/engajamento/conteúdo/equipe | direto |
+| 9 | Autoridade Temática (IAT) | 8.2 projetos realizados + resultados concretos | direto |
+| 10 | Experiência Política (IExP) | 8.2 tempo de atuação + mandato anterior | direto |
+| 11 | Experiência Administrativa (IExA) | 8.2 atuação administrativa | direto |
+| 12 | Relacionamento Institucional (IRI) | 8.3 relação com entidades/lideranças regionais | direto |
+| 13 | Apoio Partidário (IAP) | 8.1 partido definido + 8.3 apoio do partido | direto |
+| 14 | Disponibilidade (IDisp) | 8.5 tempo + viagens | direto |
+| 15 | Resiliência (IRes) | 8.6 resistência a ataques + disciplina | direto |
+| 16 | Risco Reputacional (IRR) | 8.4/8.6 rejeição percebida + disciplina (invertido) | direto, nota alta = pior |
+| 17 | Rejeição Potencial (IRP) | 8.4 rejeição percebida | direto, nota alta = pior |
+| 18 | Potencial de Crescimento (IPC) | composto: gap entre ICP atual e (IEP+IMob+IEO)/3 | **derivado** |
+| 19 | Competitividade Inicial (ICI) | composto: média ponderada de ICP+ICT+IEP+ICom | **derivado** |
+| 20 | Prontidão Eleitoral (IPE) | composto geral: média ponderada de todos os anteriores, penalizado por IRR | **derivado, índice-síntese** |
+
+Os 3 marcados **derivado** não pedem pergunta nova — são recombinações documentadas dos 17 diretos, no mesmo espírito do "Índice Geral de Viabilidade Eleitoral" (Seção 21) que o briefing já define como composto.
+
+---
+
+## 6. Fluxo da aplicação (4 modos)
+
+```
+                         ┌─────────────────────┐
+                         │   app.py (navegação) │
+                         └──────────┬───────────┘
+              ┌──────────┬──────────┼──────────┬──────────┐
+              ▼          ▼          ▼          ▼
+          Modo 1     Modo 2     Modo 3     Modo 4
+         Candidato  Território   Pautas   Integração
+              │          │          │          │
+   questionnaire/   (já existe:  public_policies/  candidates/ +
+   indicators/    potential_index,  platforms/    territorial +
+   profiles/      state_scope_ind,              platforms →
+              │    clustering, etc.)              matriz seç.15
+              └──────────┴──────────┴──────────────┘
+                          │
+                   src/reports/ (3 relatórios ~50 pág.)
+```
+
+Modo 1 (Candidato) é o único sem nenhuma dependência de dado real pré-existente — roda 100% a partir do questionário. Modo 2 (Território) já roda hoje. Modo 3 (Pautas) precisa dos conectores de políticas públicas (DATASUS/INEP/SICONFI/SNIS — Seção 6.3, hoje não integrados) para sair do nível "estrutura + texto" e chegar a "diagnóstico com indicador oficial"; a Etapa 1 implementa a estrutura de pauta com **campos para indicador oficial declarados e vazios quando a fonte não está conectada** (nunca preenchidos com número inventado), seguindo a mesma regra de honestidade de lacuna já usada no resto do sistema.
+
+---
+
+## 7. Estrutura de pastas — diff real sobre o repositório existente
+
+Só o que muda. Tudo que já existe continua exatamente onde está.
+
+```
+sistema_inteligencia_eleitoral_v2/
+├── config/
+│   ├── weights.yaml                      [NOVO] pesos dos 20 indices + arquetipos
+│   ├── policy_areas.yaml                 [NOVO, Etapa futura] as ~35 pautas da secao 14.1
+│   └── report_config.yaml                [NOVO, Etapa futura] estrutura dos 3 relatorios
+│
+├── src/
+│   ├── questionnaire/                    [NOVO]
+│   │   ├── __init__.py
+│   │   └── candidate_questionnaire.py    schema (secao 8) + conversao categoria->nota
+│   ├── indicators/                       [NOVO]
+│   │   ├── __init__.py
+│   │   └── candidate_indices.py          os 20 indices (secao 11)
+│   ├── profiles/                         [NOVO]
+│   │   ├── __init__.py
+│   │   └── candidate_archetype.py        arquetipos (secao 12)
+│   ├── public_policies/                  [NOVO, Etapa futura]
+│   ├── platforms/                        [NOVO, Etapa futura]
+│   ├── candidates/                       [NOVO, Etapa futura] orquestra Modo 1 completo
+│   ├── rivals/                           [NOVO, Etapa futura] rivais hipoteticos
+│   ├── parties/                          [NOVO, Etapa futura] usa proportional_analysis.py
+│   ├── projections/                      [NOVO, Etapa futura] Monte Carlo / cenarios
+│   └── reports/                          [NOVO, Etapa futura] 3 relatorios ~50 pag.
+│
+├── data/processed/
+│   ├── questionnaire/                    [NOVO, Etapa futura] parquet de respostas
+│   └── analyses/                         [NOVO, Etapa futura] parquet de indices/arquetipos calculados
+│
+└── tests/
+    ├── test_candidate_questionnaire.py   [NOVO — implementado, 9 testes]
+    ├── test_candidate_indices.py         [NOVO — implementado, 9 testes]
+    └── test_candidate_archetype.py       [NOVO — implementado, 7 testes]
+```
+
+`app.py`, todos os 30 módulos existentes de `src/`, `config/data_sources.yaml`, `config/indicators.yaml`, `config/settings.yaml`, `tests/` existentes: **zero alteração** nesta etapa.
+
+**Nota de honestidade de escopo**: nesta Etapa 1, `RespostaQuestionario` e `ResultadoIndicesCandidato` existem só como dataclasses em memória (calculadas sob demanda, ex.: `scripts/demo_modulo_candidato.py`) — **a persistência em Parquet descrita na Seção 3 (`data/processed/questionnaire/`, `data/processed/analyses/`) é a decisão de arquitetura para quando a página Streamlit do questionário existir (próxima etapa do roteiro, Seção 8), não algo já implementado agora.** Sem uma UI que gere análises de verdade, criar as pastas e um formato de arquivo vazio seria estrutura sem função.
+
+---
+
+## 8. Roteiro das próximas etapas (não implementadas ainda, ordem proposta)
+
+1. ✅ **Etapa 1** (este documento) + primeira fatia vertical real: questionário + 20 índices + arquétipos do candidato, testado (revisão posterior corrigiu 4 problemas reais — ver histórico do projeto — e acrescentou 2 testes de guarda de regressão).
+2. ✅ **Página Streamlit do questionário**, integrada em `app.py` e testada no navegador (Playwright). Desvio real em relação ao plano original: não entrou como mais uma opção dentro do `st.radio` de navegação existente (`_opcoes_secao`) porque todo aquele bloco só é alcançável **depois** de uma candidatura real do TSE ser carregada (`st.stop()` na linha ~590 se nenhuma disputa foi selecionada) — o Modo 1 não depende de TSE por definição. Solução: um seletor de modo novo (`st.sidebar.radio`, antes até do cabeçalho "Selecione a disputa"), que bifurca para a página do questionário e dá `st.stop()` antes de chegar no fluxo de busca do TSE. Modo padrão continua sendo o fluxo existente — zero mudança de comportamento pra quem não mexe no seletor.
+3. ✅ **Módulo de pautas/plataforma** (Seções 10 e 14): `config/policy_areas.yaml` (35 pautas, competência federativa real com base legal citável — Art. 23/24/30/32/144/217/225/227/230 CF/88 e leis específicas), `config/policy_weights.yaml` (20 índices da Seção 14.3), `src/questionnaire/policy_questionnaire.py`, `src/indicators/policy_indices.py`, `src/profiles/policy_classification.py` (matriz de priorização, Seção 14.4), `src/platforms/platform_builder.py` (Seção 14.5, com o gate de competência do cargo — nunca gera "órgão responsável" nem "causas/consequências" fabricados). 30 testes novos, 210 no total, zero regressão. Desvio real do plano original: não criamos `src/public_policies/` como pasta separada de `src/platforms/` — a Seção 14.2 (diagnóstico por pauta) e a 14.5 (montagem da plataforma) acabaram cabendo no mesmo módulo sem justificar dois pacotes distintos nesta etapa; revisar se isso muda quando os conectores de dado oficial (DATASUS/INEP/SICONFI/SNIS) entrarem. **Achado real, não fabricado**: para estas 35 pautas de política social, o desenho constitucional brasileiro (Art. 23, competência comum) faz o gate aprovar quase toda combinação cargo×pauta — o valor do gate está em nunca deixar isso silencioso e em indicar o órgão certo por nível de governo, não em bloquear combinações (documentado no fim de `policy_areas.yaml`).
+4. ✅ **Página Streamlit do questionário de pautas**, integrada em `app.py` como terceira opção do mesmo seletor de modo (`v2_modo_app`) — "Questionário de pauta/plataforma". Testada no navegador (Playwright): formulário completo, expanders, seleção real de categorias, cálculo e exibição dos 20 índices + matriz de priorização + plataforma gerada (gate de competência, órgão responsável, campos pendentes nunca fabricados). Caso extremo real testado: questionário vazio classifica automaticamente como "Pauta Não Recomendada" (comportamento conservador correto, não um bug). 210 testes continuam passando, zero regressão.
+5. ✅ **Rivais hipotéticos + compatibilidade partidária** (`src/rivals/hypothetical_rivals.py`, `src/parties/party_compatibility.py`, Seções 17/22). Metodologia deliberadamente diferente dos módulos 1-4: **não é autoavaliação** — todo componente vem de dado real do TSE da disputa comparável mais recente (mesmo cargo/UF/[município], via `buscar_candidatos_disputa`/`listar_municipios_uf` já existentes em `src/candidate_finder.py`, reaproveitados sem duplicar lógica). A única premissa hipotética, sempre declarada na UI, é que essa disputa passada é um proxy razoável de quem disputará a próxima eleição. `config/rivals_weights.yaml` define o Índice de Rivalidade (força eleitoral 60% + foi eleito 25% + mesmo partido do candidato 15%). Campo aditivo `partido_sigla` em `IdentificacaoAnalise` (fora de `campos_numericos()` — não alimenta nenhum índice de autoavaliação). Categorias de rival decididas como **honestamente computáveis** com o dado disponível (`rival_partidario`, `rival_dominante`, `rival_direto`, `rival_de_baixa_ameaca`); `rival_emergente`/`aliado_potencial`/`candidato_complementar` do briefing original ficaram de fora por exigirem dado (segundo ciclo histórico, coalizão, discurso) que o sistema não tem — não fabricados. Integrado como nova seção dentro da página do questionário de candidato existente (não um modo/página nova) e testado no navegador (Playwright) com dado real de Governador/AC 2022: Gladson Camelli (PP, eleito, 242.100 votos) e Jorge Viana (PT, não eleito, 103.265 votos, 2º lugar) — validado contra o resultado real dessa eleição. 12 testes novos (cross-check dinâmico contra `buscar_candidatos_disputa`, nunca valor hardcoded), 222 no total, zero regressão.
+6. ✅ **Matriz candidato×território×pauta** (`src/integration/candidate_territory_policy_matrix.py`, Modo 4 - Integração, Seção 15). Cruza saída **já calculada** dos Modos 1 e 3 (nunca recalcula índice a partir de resposta bruta) com um perfil territorial real novo. **Achado real que redesenhou o escopo**: o perfil demográfico por território fino (bairro/zona) do resto do SIET (`demographic_analysis.perfil_demografico_do_territorio`) é ponderado pelos **votos reais** de uma candidatura já disputada — inexistente para o candidato hipotético do Modo 1 (zero votos ainda). Solução real, não um workaround escondido: perfil territorial no nível de **município inteiro**, ponderado por **população real do setor censitário** (Censo IBGE 2022) em vez de voto — mais grosso que o resto do sistema, mas real, reaproveitando as MESMAS variáveis e o MESMO rationale de literatura já documentados em `config/indicators.yaml:piramide_maslow` (nenhum mapeamento pauta→variável novo inventado). `src/economic_analysis.py` ganhou um núcleo `carregar_perfil_economico_por_municipio(municipio, uf)` sem exigir `Candidatura` (refatoração aditiva, `carregar_perfil_economico_municipio(candidatura)` virou wrapper fino — mesma chave de cache, zero regressão, teste `test_economic_analysis.py` confirmou). **Decisão deliberada de não fabricar um "escore de compatibilidade território×pauta"**: misturar dado real (Censo/RAIS-CAGED) com autoavaliação (Candidato/Pauta) num único número inventaria uma equivalência que os dados não sustentam — `config/integration_weights.yaml` só pondera o cruzamento Candidato×Pauta (autoridade temática do Modo 1 + aderência autoavaliada do Modo 3 + prioridade já calculada da pauta, todos 0-100 da mesma família metodológica); o perfil territorial é mostrado ao lado, nunca somado. Gate de competência (Seção 14.5) sempre roda primeiro: pauta fora da competência real do cargo zera a compatibilidade mesmo com autoavaliação alta (testado). UI: nova página no seletor de modo existente (`v2_modo_app`), formulário único (1 pauta por análise — comparar várias pautas de uma vez na UI fica para uma etapa futura, o backend já aceita lista). Testado no navegador (Playwright) com dado real de Pitangueiras/SP (73 setores censitários, 99,96% água encanada, renda média R$2.476,78, RAIS/CAGED 9.125 vínculos ativos) cruzado com pauta de saneamento: índice de compatibilidade 60/100 = 62×0,30 + 100×0,30 + 29×0,40, conferido manualmente contra a fórmula. 7 testes novos, 229 no total, zero regressão.
+7. ✅ **Cenários/projeções Monte Carlo** (`src/projections/monte_carlo.py`, Seção 19). Metodologia deliberada: simulação PARAMÉTRICA que propaga a incerteza estatística **real** já estimada por `src/regression_models.py` (erro-padrão de cada coeficiente de um modelo já ajustado sobre dado eleitoral real) — sorteia repetidamente (`n_simulacoes`) coeficientes de `Normal(coeficiente, erro_padrão)` e aplica aos territórios reais, em vez de fabricar uma taxa de crescimento ou pesquisa hipotética para gerar os cenários "conservador/mediano/otimista" que a Seção 19 pede. `cenario_agregado_votos()` soma a previsão território a território **dentro de cada simulação antes de extrair os percentis** — a única forma matematicamente válida de caracterizar a distribuição de uma soma de territórios correlacionados (todos usam o mesmo sorteio de coeficientes por vir do mesmo modelo). **Achado real corrigido durante os testes**: a hipótese inicial de que "somar percentis marginais superestima a incerteza" só vale para variáveis independentes — aqui os territórios são fortemente correlacionados (mesmo sorteio de coeficientes), então as duas abordagens dão bandas quase idênticas; o teste de regressão foi reescrito para verificar a propriedade que é de fato sempre garantida (a soma bate com o recálculo direto da matriz de simulações), e o texto de `limitacoes` foi corrigido para não alegar uma direção de erro que a matemática não garante. `src/regression_models.py` ganhou uma coluna aditiva `erro_padrao` nos coeficientes da regressão logística (antes só a linear expunha isso) — não quebra nada existente, testado. Limitação declarada: o intercepto é tratado como fixo (os objetos de resultado não expõem seu erro-padrão); a simulação nunca representa turnout futuro, comportamento de rivais ou qualquer evento de uma eleição ainda não ocorrida. Integrado como nova seção dentro de "Estatística Avançada" (candidatura real já disputada), logo após "Seções eleitorais com maior potencial" — reaproveita os mesmos `reg`/`base_territorio`/`potencial` já calculados ali, sem recomputar nada. Testado no navegador com dado real (Aline Torres, Vereadora suplente, São Paulo 2024): 10 votos reais nos territórios de maior potencial → cenário conservador 0, mediano 99, otimista 632, sobre 2.000 simulações. 9 testes novos, 238 no total, zero regressão.
+8. ✅ **Relatórios ricos reutilizáveis** (`src/reports/`, Seção 28) — 3 de 3 tipos concluídos.
+   - ✅ **Tipo 1 — Relatório Completo** (`src/reports/design_system.py` + `src/reports/relatorio_completo.py`). Reaproveita o mesmo design system A4 (`.page`, `.kpi-grid`, `.callout`, `.badge`, `.toc-list`) já validado nos relatórios entregues como arquivo para candidatos reais (Orlando Silva, Boulos, etc.) nesta sessão, agora centralizado como módulo Python reutilizável em vez de HTML copiado manualmente por candidato. **Achado real que reduziu o escopo**: a seção "Relatorio" já existente em `app.py` (~linha 2595) já calcula quase tudo que um relatório rico precisa (ranking, índice territorial, rivais, correlações, regressão, clusters, potencial, Maslow, perfil econômico) dentro de um único objeto `DadosRelatorio` — o trabalho da Etapa 8/Tipo 1 foi construir um **renderizador novo** para esse objeto já existente (`gerar_relatorio_completo_html`), não um pipeline de análise novo. `DadosRelatorio` (`src/report_generator.py`) ganhou 6 campos aditivos opcionais (`ranking_partidos`, `concentracao_territorial`, `zonas_disputa`, `regressao_linear`, `cenario_monte_carlo`, `simulacao_monte_carlo`, todos default `None`) — zero regressão para quem já usa a classe sem preenchê-los (`gerar_relatorio_html`/`gerar_relatorio_pdf` existentes continuam ignorando esses campos). **Fronteira de escopo deliberada e permanente**: o gerador nunca produz seções de biografia, repercussão na mídia ou trajetória eleitoral histórica, porque essas exigem pesquisa real via WebSearch específica por candidato — incompatível com um gerador 100% automático reutilizável; reforçado por teste de regressão dedicado (`test_gerar_relatorio_completo_nunca_fabrica_biografia_ou_midia`). Bug real encontrado e corrigido durante os testes: o bloco `<head>` do design system usava `.format(titulo=...)` sobre uma string que já continha o CSS embutido — como toda regra CSS tem chaves literais (`:root { --paper: ... }`), `.format()` tentava interpretar cada uma como placeholder e quebrava com `KeyError`; corrigido convertendo para uma função `head(titulo)` que monta a string por concatenação direta (nunca reaplicando `.format()`/f-string depois de já ter o CSS embutido). Integrado em `app.py`: a seção "Relatorio" agora computa a regressão linear percentual incondicionalmente (antes só rodava como fallback do Maslow quando a logística falhava) e a simulação de Monte Carlo reaproveitando o módulo da Etapa 7, passa tudo para `DadosRelatorio`, e ganhou um 4º botão de download ("Baixar relatorio completo (rico)") ao lado dos already existentes HTML/PDF/Excel. Testado no navegador (Playwright) com dado real (Aline Torres, Vereadora suplente, São Paulo 2024, número 15900): relatório de 31 páginas gerado, nome real da candidata presente, seção de Cenários Monte Carlo presente com o texto metodológico correto, zero termos de biografia/mídia fabricados, zero erros de console JS. 5 testes novos (`tests/test_relatorio_completo.py`), 243 no total, zero regressão.
+   - ✅ **Tipo 2 — Estratégia/Marketing, versão automática enxuta** (`src/reports/relatorio_estrategia.py`). **Decisão de escopo tomada com o usuário antes de codar**: a "Parte 2" dos relatórios Orlando/Boulos que este tipo deveria espelhar tem capítulos de narrativa manual por zona ("Zona 192 — a maior oportunidade isolada do estado") e uma seção de pesquisa cultural/microinfluenciadores via WebSearch específica por candidato ("Criadores e páginas locais reais") — inconciliável com gerador automático pela mesma razão que barra biografia/mídia no Tipo 1. Opção escolhida (entre 3 apresentadas): versão automática enxuta cobrindo só o 100% calculável — portfólio de territórios de investimento (reaproveita `identificar_bairros_potencial` do Tipo 1), plano de ação (a MESMA classificação de potencial reapresentada em ordem de prioridade — nunca uma tática nova inventada, ver nota metodológica no módulo), rivais diretos + patrimônio comparativo real (`patrimonio_comparativo`, `src/candidate_assets.py`, já existente e usado em outra seção do app, nunca antes ligado a um relatório), segmentação territorial (clusters) e leitura de necessidades via Pirâmide de Maslow (explicitamente rotulada como proxy demográfico, não pesquisa de opinião). `DadosRelatorio` ganhou 1 campo aditivo (`patrimonio_comparativo: pd.DataFrame | None = None`). **Erro de teste real encontrado e corrigido**: o primeiro guard de não-fabricação testava substrings genéricas em minúsculo ("cena cultural", "microinfluenciadores") que colidiam com o próprio texto de limitação deste gerador (que descreve em prosa o que fica de fora usando essas mesmas palavras) — falso positivo, não um bug de fabricação real; corrigido trocando para os títulos exatos (grafia/acentuação) das seções reais do relatório do Orlando que nunca devem aparecer como cabeçalho aqui. Integrado em `app.py`: computa `patrimonio_comparativo(candidatura, ranking, top_n=7)` na seção "Relatorio" e ganhou um 5º botão de download ("Baixar relatorio de estrategia"). Testado no navegador (Playwright) com dado real (Aline Torres): relatório de 17 páginas, "Plano de ação priorizado" com "Prioridade 1" real, patrimônio comparativo presente, zero termos das seções manuais proibidas, zero erros de console JS. 5 testes novos (`tests/test_relatorio_estrategia.py`), 248 no total, zero regressão.
+   - ✅ **Tipo 3 — Comparativo/Histórico** (`src/candidate_history.py` + `src/reports/relatorio_comparativo.py`), mirando a "Parte 3" dos relatórios Priante/Boulos. Diferente dos tipos 1 e 2 (que só trocam o renderizador de dado já calculado), este tipo precisa primeiro **descobrir se existe uma segunda disputa real da mesma pessoa** em outro ano carregado localmente — uma capacidade nova, não uma reapresentação. **Achado real que definiu o desenho**: as fontes deste projeto (`consulta_cand`) não trazem CPF nem título de eleitor, só `NM_CANDIDATO` (nome completo declarado) — o único identificador possível entre anos é nome + UF, um risco real de falso-positivo por homônimo (o Brasil tem muitos nomes comuns). Resolvido de forma deliberadamente conservadora em `buscar_candidatura_comparavel()`: só aceita o cruzamento quando existe **exatamente uma** combinação (número, cargo) com aquele nome/UF no ano comparável — zero ou mais de uma combinação (homônimos) faz a função retornar `None`, nunca escolhe adivinhando. **Segundo achado real que limitou o escopo**: `votacao_secao` (nível de seção/zona, necessário para comparativo territorial) só existe localmente para 2022 e 2024 — `ano_comparavel_padrao()` só tenta essas duas direções; uma candidatura de 2018 encontrada no registro (`consulta_cand_2018` existe, mas sem seção) é reportada como registro real (cargo/partido/resultado) sem comparativo territorial, nunca fabricado. Quando um comparável real é encontrado nos dois anos, reaproveita a MESMA metodologia já validada nesta sessão para o comparativo Boulos 2022×2024 (zonas eleitorais como unidade comum entre cargos/anos + correlação de Pearson do voto por zona como índice de continuidade territorial) — nenhuma fórmula nova inventada. `DadosRelatorio` ganhou 1 campo aditivo (`comparativo_historico`). Validado com 2 casos reais encontrados por acaso ao testar (não escolhidos a dedo): GARRY DERALUS (Deputado Estadual/SP 2022, suplente PT → Vereador/São Paulo 2024, suplente PT — 54 zonas em comum, correlação territorial real 0,792) e IARA BERNARDI (Vereadora/Sorocaba 2024, eleita PT — comparável real também encontrado em 2022) — e 1 caso real de não-encontrado (Aline Torres, sem segunda candidatura conhecida em 2022/SP), confirmando que o gerador degrada graciosamente em vez de inventar uma trajetória. Integrado em `app.py`: computa `montar_comparativo_historico(candidatura, vc, vd, rd)` na seção "Relatorio" e ganhou um 6º botão de download ("Baixar relatorio comparativo"). Testado no navegador (Playwright, dado real de IARA BERNARDI): relatório de 9 páginas com seções "Duas disputas reais" e "Zona a zona" presentes, zero erros de console JS. 4 testes novos (`tests/test_relatorio_comparativo.py`, cobrindo o caso encontrado com território, o caso não-encontrado e o campo aditivo vazio), 252 no total, zero regressão.
+
+Com os 3 tipos do Tipo 8 concluídos, o roteiro completo da Seção 8 está encerrado (todas as 8 etapas propostas, do questionário inicial aos relatórios ricos reutilizáveis, implementadas como código real e testado).
+
+Cada etapa entra como código real, testado, sem stub — no ritmo em que for construída, não prometida de uma vez.

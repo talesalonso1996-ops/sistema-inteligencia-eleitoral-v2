@@ -1,0 +1,23 @@
+# Pesos do Indice de Rivalidade Eleitoral (secao 17 do briefing de
+# expansao SIET). DIFERENTE dos demais indices desta expansao
+# (config/weights.yaml, config/policy_weights.yaml): este NAO e
+# autoavaliacao - todo componente vem de dado real de uma disputa
+# comparavel real do TSE (ver src/rivals/hypothetical_rivals.py). A
+# unica parte "hipotetica" e a premissa de que a disputa comparavel mais
+# recente e um proxy razoavel de quem disputara a proxima eleicao -
+# premissa declarada explicitamente em todo resultado deste modulo, nunca
+# escondida.
+
+indice_rivalidade:
+  pesos:
+    forca_eleitoral: 0.60      # votos do rival normalizados pelo 1o colocado da disputa comparavel
+    foi_eleito: 0.25           # bonus se o rival se elegeu na disputa comparavel
+    mesmo_partido_candidato: 0.15  # bonus se o rival e do mesmo partido informado pelo candidato
+
+limites_classificacao:
+  # mesma faixa 0-100 do resto do SIET
+  muito_alto: 80
+  alto: 60
+  moderado: 40
+  baixo: 20
+  critico: 0

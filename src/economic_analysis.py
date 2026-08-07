@@ -55,21 +55,30 @@ def _caminho(caminho: str) -> str:
     return caminho if (len(caminho) > 1 and caminho[1] == ":") else str(resolve_path(caminho))
 
 
-def resolver_codigo_municipio_rais(candidatura: Candidatura) -> str | None:
+def resolver_codigo_municipio_rais_por_nome(municipio: str, uf: str) -> str | None:
     """Deriva o codigo de municipio no formato RAIS/CAGED (IBGE 7 digitos
     sem o digito verificador) a partir da malha de setores censitarios ja
-    usada em geographic_analysis (mesma fonte oficial IBGE CD_MUN)."""
-    setores = carregar_malha("setores", candidatura.municipio, candidatura.uf)
+    usada em geographic_analysis (mesma fonte oficial IBGE CD_MUN). Nucleo
+    compartilhado por `resolver_codigo_municipio_rais` (candidatura real) e
+    pelo Modulo de Integracao (`src/integration/`, municipio informado num
+    questionario, sem candidatura real)."""
+    setores = carregar_malha("setores", municipio, uf)
     if setores is None or setores.empty or "CD_MUN" not in setores.columns:
         logger.warning(
             "Nao foi possivel resolver o codigo RAIS do municipio '%s' - malha indisponivel.",
-            candidatura.municipio,
+            municipio,
         )
         return None
     cd_mun_ibge = str(setores["CD_MUN"].iloc[0]).strip()
     if len(cd_mun_ibge) < 7:
         return None
     return cd_mun_ibge[:6]
+
+
+def resolver_codigo_municipio_rais(candidatura: Candidatura) -> str | None:
+    """Atalho de `resolver_codigo_municipio_rais_por_nome` a partir dos
+    campos de uma candidatura real do TSE."""
+    return resolver_codigo_municipio_rais_por_nome(candidatura.municipio, candidatura.uf)
 
 
 def _classificar_tendencia(saldo: int, vinculos_ativos: int) -> str:
@@ -83,19 +92,22 @@ def _classificar_tendencia(saldo: int, vinculos_ativos: int) -> str:
     return "estavel"
 
 
-def carregar_perfil_economico_municipio(candidatura: Candidatura) -> PerfilEconomicoMunicipio:
-    """Ponto de entrada principal: retorna o perfil economico do municipio
-    da candidatura (RAIS + CAGED). Nunca lanca excecao por dado ausente -
-    retorna disponivel=False com tendencia='indisponivel' se a fonte nao
-    existir ou o municipio nao for encontrado (secao 17 do briefing:
-    degradar graciosamente, nunca inventar)."""
-    key = cache_key("perfil_economico", candidatura.codigo_municipio_tse, candidatura.municipio)
+def carregar_perfil_economico_por_municipio(
+    municipio: str, uf: str, chave_cache: str | int | None = None
+) -> PerfilEconomicoMunicipio:
+    """Nucleo de `carregar_perfil_economico_municipio` (candidatura real do
+    TSE) e do Modulo de Integracao (`src/integration/`, municipio informado
+    num questionario, sem candidatura real) - mesma fonte RAIS/CAGED, sem
+    duplicar logica. `chave_cache` diferencia o cache quando o mesmo nome
+    de municipio existe em mais de um contexto (ex.: codigo TSE da
+    candidatura); usa o proprio nome do municipio quando omitido."""
+    key = cache_key("perfil_economico", chave_cache if chave_cache is not None else municipio, municipio)
     cached = read_cache("economic_analysis", key)
     if cached is not None and not cached.empty:
         row = cached.iloc[0]
         return PerfilEconomicoMunicipio(**{**row.to_dict(), "disponivel": bool(row["disponivel"])})
 
-    codigo_rais = resolver_codigo_municipio_rais(candidatura)
+    codigo_rais = resolver_codigo_municipio_rais_por_nome(municipio, uf)
     if codigo_rais is None:
         resultado = PerfilEconomicoMunicipio(
             codigo_municipio_rais=None, vinculos_ativos_total=None, estabelecimentos_ativos=None,
@@ -161,3 +173,14 @@ def carregar_perfil_economico_municipio(candidatura: Candidatura) -> PerfilEcono
     )
     write_cache("economic_analysis", key, pd.DataFrame([resultado.__dict__]))
     return resultado
+
+
+def carregar_perfil_economico_municipio(candidatura: Candidatura) -> PerfilEconomicoMunicipio:
+    """Ponto de entrada principal: retorna o perfil economico do municipio
+    da candidatura (RAIS + CAGED). Nunca lanca excecao por dado ausente -
+    retorna disponivel=False com tendencia='indisponivel' se a fonte nao
+    existir ou o municipio nao for encontrado (secao 17 do briefing:
+    degradar graciosamente, nunca inventar)."""
+    return carregar_perfil_economico_por_municipio(
+        candidatura.municipio, candidatura.uf, chave_cache=candidatura.codigo_municipio_tse
+    )

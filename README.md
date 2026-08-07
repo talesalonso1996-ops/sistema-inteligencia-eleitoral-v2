@@ -110,3 +110,75 @@ tests/              Testes automatizados (pytest)
 ```powershell
 .venv\Scripts\python -m pytest tests -v
 ```
+
+## Modulo Candidato (expansao em andamento)
+
+Primeira fatia de uma expansao maior do sistema (candidato + territorio +
+pautas + analise integrada, com 4 modos de uso e relatorios longos). O
+territorio (este README, acima) ja existia e continua identico. O que foi
+adicionado nesta etapa e o **Modo 1 - Candidato**: um questionario de
+autoavaliacao (nao dado eleitoral) que gera 20 indices de perfil e um
+arquetipo politico-eleitoral.
+
+```
+src/questionnaire/candidate_questionnaire.py   Schema do questionario + escala categoria->nota
+src/indicators/candidate_indices.py            Os 20 indices (0-100, pesos configuraveis)
+src/profiles/candidate_archetype.py            Classificacao de arquetipo
+config/weights.yaml                            Pesos e regras normativas (editavel sem mexer em codigo)
+scripts/demo_modulo_candidato.py               Demonstracao end-to-end com dado ficticio
+```
+
+**Aviso metodologico importante**: diferente dos indices de territorio
+acima (calculados a partir de dado real do TSE/IBGE), os 20 indices do
+Modulo Candidato nascem de **autoavaliacao categorica** (nenhuma/baixa/
+moderada/alta/muito alta) preenchida pelo proprio candidato ou por quem
+responde em seu nome. Sao escores normativos, nunca medicao objetiva -
+rotulados como tal em todo lugar que aparecem. Detalhe completo da decisao
+metodologica e do roteiro das proximas etapas (pautas, rivais, matriz
+integrada, relatorios de ~50 paginas) em `ETAPA1_ARQUITETURA.md`.
+
+Rodar a demonstracao:
+
+```powershell
+.venv\Scripts\python scripts\demo_modulo_candidato.py
+```
+
+Rodar so os testes novos:
+
+```powershell
+.venv\Scripts\python -m pytest tests/test_candidate_questionnaire.py tests/test_candidate_indices.py tests/test_candidate_archetype.py -v
+```
+
+## Modulo de Pautas/Plataforma (expansao em andamento)
+
+Segunda fatia da expansao (Modo 3 do briefing): questionario de pauta de
+politica publica -> 20 indices -> matriz de priorizacao -> plataforma de
+governo, com verificacao de competencia federativa do cargo antes de
+qualquer proposta.
+
+```
+config/policy_areas.yaml                  35 pautas, competencia federativa real (base legal citavel - CF/88)
+config/policy_weights.yaml                Pesos dos 20 indices + matriz de priorizacao (secao 14.4)
+src/questionnaire/policy_questionnaire.py Schema da proposta de pauta (secao 10)
+src/indicators/policy_indices.py          Os 20 indices (secao 14.3)
+src/profiles/policy_classification.py     Matriz de priorizacao (secao 14.4)
+src/platforms/platform_builder.py         Montagem da plataforma + gate de competencia do cargo (secao 14.5)
+scripts/demo_modulo_pautas.py             Demonstracao end-to-end com dado ficticio
+```
+
+Mesmo aviso metodologico do Modulo Candidato: os 20 indices sao
+autoavaliacao categorica do formulario, nao dado oficial de politica
+publica (isso exigiria os conectores DATASUS/INEP/SICONFI/SNIS da secao
+6.3 do briefing, ainda nao integrados). A UNICA parte deste modulo que e
+dado real e verificavel e a competencia federativa/base legal de cada
+pauta (`config/policy_areas.yaml`), usada pelo gate de
+`platform_builder.py` para nunca gerar um "orgao responsavel" incompativel
+com o cargo analisado - e para nunca inventar causas/consequencias sobre
+um problema real que o sistema nao conhece (esses campos ficam
+explicitamente marcados como pendentes de elaboracao). Detalhe completo em
+`ETAPA1_ARQUITETURA.md`.
+
+```powershell
+.venv\Scripts\python scripts\demo_modulo_pautas.py
+.venv\Scripts\python -m pytest tests/test_policy_questionnaire.py tests/test_policy_indices.py tests/test_policy_classification.py tests/test_platform_builder.py -v
+```

@@ -95,6 +95,11 @@ from src.geographic_analysis import (
 )
 from src.maslow_analysis import gerar_analise_maslow
 from src.potential_analysis import identificar_bairros_potencial
+from src.projections.monte_carlo import cenario_agregado_votos, simular_regressao_linear
+from src.candidate_history import montar_comparativo_historico
+from src.reports.relatorio_completo import gerar_relatorio_completo_html
+from src.reports.relatorio_comparativo import gerar_relatorio_comparativo_html
+from src.reports.relatorio_estrategia import gerar_relatorio_estrategia_html
 from src.potential_index import calcular_indice_performance
 from src.regression_models import regressao_linear_votos, regressao_logistica_bom_desempenho
 from src.report_generator import DadosRelatorio, gerar_relatorio_html, gerar_relatorio_pdf
@@ -103,6 +108,44 @@ from src.vote_filtering import secao_composta, zona_uf_composta
 from src.voronoi_analysis import gerar_voronoi
 import src.charts as charts
 import src.maps as maps
+
+# Modulo Candidato (Modo 1 da expansao SIET) - questionario de
+# autoavaliacao, independente de qualquer candidatura real do TSE. Ver
+# ETAPA1_ARQUITETURA.md.
+from src.indicators.candidate_indices import calcular_indices_candidato
+from src.profiles.candidate_archetype import classificar_arquetipo
+from src.questionnaire.candidate_questionnaire import (
+    BaseEleitoral,
+    Comunicacao,
+    IdentificacaoAnalise,
+    NivelIntensidade,
+    Posicionamento,
+    Recursos,
+    RespostaQuestionario,
+    SimNao,
+    Trajetoria,
+)
+
+# Rivais projetados + compatibilidade partidaria (secoes 17/22, dentro do
+# Modulo Candidato) - DIFERENTE do resto do modulo: usa dado real do TSE da
+# disputa comparavel mais recente, nunca autoavaliacao. Ver
+# src/rivals/hypothetical_rivals.py e src/parties/party_compatibility.py.
+from src.parties.party_compatibility import avaliar_compatibilidade_partidaria
+from src.rivals.hypothetical_rivals import identificar_rivais_projetados
+
+# Modulo de Pautas/Plataforma (Modo 3 da expansao SIET) - questionario de
+# pauta de politica publica, independente de qualquer candidatura real do
+# TSE. Ver ETAPA1_ARQUITETURA.md.
+from src.indicators.policy_indices import calcular_indices_pauta
+from src.platforms.platform_builder import montar_plataforma, verificar_gate_competencia
+from src.profiles.policy_classification import classificar_pauta
+from src.questionnaire.policy_questionnaire import PropostaPauta, pautas_disponiveis, policy_areas_config
+
+# Matriz Candidato x Territorio x Pauta (Modo 4 - Integracao, secao 15).
+# Cruza a saida ja calculada dos Modos 1 e 3 com o perfil territorial REAL
+# (Censo IBGE/RAIS-CAGED) do municipio informado. Ver
+# src/integration/candidate_territory_policy_matrix.py.
+from src.integration.candidate_territory_policy_matrix import montar_matriz_candidato_territorio_pauta
 
 st.set_page_config(page_title="Sistema de Inteligencia Eleitoral", layout="wide", page_icon="\U0001F5F3")
 
@@ -217,6 +260,639 @@ def _fmt(v) -> str:
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return "n/d"
     return f"{v:,.0f}".replace(",", ".")
+
+
+# --------------------------------------------------------- Modulo Candidato
+_CARGOS_MODO1 = [
+    "Vereador", "Prefeito", "Deputado Estadual", "Deputado Distrital",
+    "Deputado Federal", "Senador", "Governador", "Presidente",
+]
+_OPCOES_NIVEL = {
+    "-- nao respondido --": None,
+    "Nenhuma": NivelIntensidade.NENHUMA,
+    "Baixa": NivelIntensidade.BAIXA,
+    "Moderada": NivelIntensidade.MODERADA,
+    "Alta": NivelIntensidade.ALTA,
+    "Muito alta": NivelIntensidade.MUITO_ALTA,
+}
+_OPCOES_SIMNAO = {"-- nao respondido --": None, "Sim": SimNao.SIM, "Nao": SimNao.NAO}
+
+
+def _nivel(label: str, key: str):
+    return _OPCOES_NIVEL[st.selectbox(label, list(_OPCOES_NIVEL.keys()), key=key)]
+
+
+def _simnao(label: str, key: str):
+    return _OPCOES_SIMNAO[st.selectbox(label, list(_OPCOES_SIMNAO.keys()), key=key)]
+
+
+def _tom_indice(valor: float, pior_quando_alto: bool) -> str:
+    v = 100 - valor if pior_quando_alto else valor
+    if v >= 60:
+        return "bom"
+    if v >= 40:
+        return "neutro"
+    return "ruim"
+
+
+# `classificacao` (critico/baixo/moderado/alto/muito_alto) e sempre a faixa
+# de MAGNITUDE bruta (mesma tabela de limites de config/weights.yaml para
+# todo indice, ver src/indicators/candidate_indices.py) - correto para
+# testes e para os 18 indices normais, mas enganoso na tela para os 2
+# indices "pior_quando_alto" (risco_reputacional, rejeicao_potencial):
+# nota 0 nesses dois e a MELHOR situacao possivel, mas apareceria rotulada
+# "critico" se mostrada sem traducao. Este dict so existe para exibicao -
+# nao altera o dado armazenado em ResultadoIndice.classificacao.
+_ROTULOS_INDICE_INVERTIDO = {
+    "critico": "risco minimo",
+    "baixo": "risco baixo",
+    "moderado": "risco moderado",
+    "alto": "risco alto",
+    "muito_alto": "risco critico",
+}
+
+
+def _rotulo_classificacao(r) -> str:
+    if r.pior_quando_alto:
+        return _ROTULOS_INDICE_INVERTIDO.get(r.classificacao, r.classificacao)
+    return r.classificacao
+
+
+def _pagina_questionario_candidato() -> None:
+    """Modo 1 (Candidato) - questionario de autoavaliacao (secao 8 do
+    briefing de expansao SIET). NAO depende de nenhuma candidatura real do
+    TSE - roda 100% a partir das respostas deste formulario. Ver
+    ETAPA1_ARQUITETURA.md e src/questionnaire/candidate_questionnaire.py."""
+    st.title("Questionario do Candidato")
+    _explicacao(
+        "Autoavaliacao estruturada - <strong>nao e dado eleitoral verificado</strong>, "
+        "diferente do resto do SIET (calculado a partir de TSE/IBGE reais). Responda o "
+        "quanto conseguir: perguntas deixadas em \"-- nao respondido --\" ficam de fora "
+        "do calculo de cada indice, e a cobertura de cada um aparece junto ao resultado - "
+        "nunca e preenchida com estimativa."
+    )
+
+    with st.form("form_questionario_candidato"):
+        st.subheader("1. Identificacao da analise")
+        c1, c2, c3 = st.columns(3)
+        cargo_pretendido = c1.selectbox("Cargo pretendido", _CARGOS_MODO1, key="q_cargo")
+        uf = c2.selectbox("UF", list(UF_NOME.keys()), key="q_uf")
+        municipio_base = c3.text_input("Municipio-base", key="q_municipio")
+        c4, c5, c6 = st.columns(3)
+        with c4:
+            partido_definido = _simnao("Partido definido?", "q_partido_definido")
+        with c5:
+            ja_disputou = _simnao("Ja disputou eleicao antes?", "q_ja_disputou")
+        with c6:
+            partido_sigla = st.text_input(
+                "Sigla do partido (se definido)", key="q_partido_sigla",
+                help="Usado para os rivais projetados e a compatibilidade partidaria abaixo - "
+                     "so preenche se 'Partido definido?' for Sim.",
+            )
+
+        with st.expander("2. Trajetoria"):
+            tempo_atuacao_publica = _nivel("Tempo de atuacao publica", "q_tempo_atuacao")
+            mandato_anterior = _simnao("Teve mandato anterior?", "q_mandato_anterior")
+            experiencia_politica_geral = _nivel("Experiencia politica geral", "q_exp_politica")
+            atuacao_administrativa = _nivel("Atuacao administrativa (gestao)", "q_atuacao_adm")
+            projetos_realizados = _nivel("Projetos realizados", "q_projetos")
+            resultados_concretos = _nivel("Resultados concretos entregues", "q_resultados")
+
+        with st.expander("3. Base eleitoral"):
+            numero_territorios = st.number_input(
+                "Numero de bairros/cidades onde tem presenca organizada", min_value=0, max_value=200, step=1,
+                key="q_num_territorios",
+            )
+            estrutura_bairros = _nivel("Estrutura nos bairros/cidades de presenca", "q_estrutura_bairros")
+            apoiadores_mobilizaveis = _nivel("Apoiadores mobilizaveis", "q_apoiadores")
+            capacidade_eventos = _nivel("Capacidade de realizar eventos", "q_eventos")
+            relacionamento_liderancas = _nivel("Relacionamento com liderancas comunitarias", "q_rel_liderancas")
+            relacionamento_vereadores = _nivel("Relacionamento com vereadores", "q_rel_vereadores")
+            relacionamento_prefeitos = _nivel("Relacionamento com prefeitos", "q_rel_prefeitos")
+            relacionamento_deputados = _nivel("Relacionamento com deputados", "q_rel_deputados")
+            relacionamento_entidades = _nivel("Relacionamento com entidades/associacoes", "q_rel_entidades")
+            liderancas_regionais = _nivel("Relacionamento com liderancas regionais", "q_liderancas_regionais")
+            apoio_do_partido = _nivel("Apoio do partido a esta candidatura", "q_apoio_partido")
+
+        with st.expander("4. Comunicacao"):
+            conhecimento_espontaneo = _nivel(
+                "Conhecimento espontaneo (eleitores que reconhecem o nome sem ajuda)", "q_conhecimento"
+            )
+            oratoria = _nivel("Oratoria", "q_oratoria")
+            desempenho_videos = _nivel("Desempenho em videos", "q_videos")
+            entrevistas = _nivel("Desempenho em entrevistas", "q_entrevistas")
+            debates = _nivel("Desempenho em debates", "q_debates")
+            resposta_criticas = _nivel("Resposta a criticas", "q_resp_criticas")
+            seguidores_redes = _nivel("Volume de seguidores nas redes sociais", "q_seguidores")
+            engajamento = _nivel("Engajamento nas redes sociais", "q_engajamento")
+            producao_conteudo = _nivel("Producao propria de conteudo", "q_conteudo")
+            equipe_comunicacao = _nivel("Equipe de comunicacao", "q_equipe_com")
+            rejeicao_percebida = _nivel("Rejeicao percebida (quanto maior, pior)", "q_rejeicao")
+
+        with st.expander("5. Recursos"):
+            disponibilidade_tempo = _nivel("Disponibilidade de tempo", "q_disp_tempo")
+            capacidade_investimento_legal = _nivel("Capacidade de investimento legal proprio", "q_investimento")
+            capacidade_arrecadacao = _nivel("Capacidade de arrecadacao de campanha", "q_arrecadacao")
+            equipe = _nivel("Equipe disponivel", "q_equipe")
+            transporte = _nivel("Transporte", "q_transporte")
+            locais_reuniao = _nivel("Locais para reuniao", "q_locais")
+            audiovisual = _nivel("Estrutura audiovisual", "q_audiovisual")
+            disponibilidade_viagens = _nivel("Disponibilidade para viagens", "q_disp_viagens")
+
+        with st.expander("6. Posicionamento"):
+            temas = st.text_input("Temas de maior identificacao (separados por virgula)", key="q_temas")
+            resistencia_ataques = _nivel("Resistencia a ataques/criticas publicas", "q_resistencia")
+            disciplina = _nivel("Disciplina (agenda, partido, mensagem)", "q_disciplina")
+
+        enviado = st.form_submit_button("Calcular indices", type="primary")
+
+    if not enviado:
+        return
+
+    resposta = RespostaQuestionario(
+        identificacao=IdentificacaoAnalise(
+            cargo_pretendido=cargo_pretendido,
+            uf=uf,
+            municipio_base=municipio_base or "-- nao informado --",
+            partido_definido=partido_definido,
+            partido_sigla=partido_sigla.strip().upper() if partido_definido == SimNao.SIM and partido_sigla.strip() else None,
+            ja_disputou_eleicao=ja_disputou if ja_disputou is not None else SimNao.NAO,
+        ),
+        trajetoria=Trajetoria(
+            tempo_atuacao_publica=tempo_atuacao_publica,
+            mandato_anterior=mandato_anterior,
+            experiencia_politica_geral=experiencia_politica_geral,
+            atuacao_administrativa=atuacao_administrativa,
+            projetos_realizados=projetos_realizados,
+            resultados_concretos=resultados_concretos,
+        ),
+        base_eleitoral=BaseEleitoral(
+            numero_territorios_presenca=int(numero_territorios) if numero_territorios else None,
+            estrutura_bairros=estrutura_bairros,
+            apoiadores_mobilizaveis=apoiadores_mobilizaveis,
+            capacidade_eventos=capacidade_eventos,
+            relacionamento_liderancas=relacionamento_liderancas,
+            relacionamento_vereadores=relacionamento_vereadores,
+            relacionamento_prefeitos=relacionamento_prefeitos,
+            relacionamento_deputados=relacionamento_deputados,
+            relacionamento_entidades=relacionamento_entidades,
+            liderancas_regionais=liderancas_regionais,
+            apoio_do_partido=apoio_do_partido,
+        ),
+        comunicacao=Comunicacao(
+            conhecimento_espontaneo=conhecimento_espontaneo,
+            oratoria=oratoria,
+            desempenho_videos=desempenho_videos,
+            entrevistas=entrevistas,
+            debates=debates,
+            resposta_criticas=resposta_criticas,
+            seguidores_redes=seguidores_redes,
+            engajamento=engajamento,
+            producao_conteudo=producao_conteudo,
+            equipe_comunicacao=equipe_comunicacao,
+            rejeicao_percebida=rejeicao_percebida,
+        ),
+        recursos=Recursos(
+            disponibilidade_tempo=disponibilidade_tempo,
+            capacidade_investimento_legal=capacidade_investimento_legal,
+            capacidade_arrecadacao=capacidade_arrecadacao,
+            equipe=equipe,
+            transporte=transporte,
+            locais_reuniao=locais_reuniao,
+            audiovisual=audiovisual,
+            disponibilidade_viagens=disponibilidade_viagens,
+        ),
+        posicionamento=Posicionamento(
+            temas_identificacao=[t.strip() for t in temas.split(",") if t.strip()],
+            resistencia_ataques=resistencia_ataques,
+            disciplina=disciplina,
+        ),
+    )
+
+    indices = calcular_indices_candidato(resposta)
+    arquetipo = classificar_arquetipo(indices)
+
+    st.divider()
+    st.subheader("Resultado")
+    st.caption(
+        f"Taxa de preenchimento do questionario: {resposta.taxa_preenchimento()}% - "
+        f"Cobertura geral dos indices: {indices.cobertura_geral_pct}%"
+    )
+    st.warning(
+        "Aviso metodologico: os indices abaixo sao autoavaliacao categorica declarada "
+        "neste formulario - nao sao medicao objetiva de dado eleitoral."
+    )
+
+    r_prontidao = indices["prontidao_eleitoral"]
+    r_competitividade = indices["competitividade_inicial"]
+    r_potencial = indices["potencial_crescimento"]
+    r_risco = indices["risco_reputacional"]
+    kpis = st.columns(4)
+    _kpi(kpis[0], "Prontidao Eleitoral", f"{r_prontidao.valor:.0f}/100", _rotulo_classificacao(r_prontidao),
+         _tom_indice(r_prontidao.valor, False))
+    _kpi(kpis[1], "Competitividade Inicial", f"{r_competitividade.valor:.0f}/100",
+         _rotulo_classificacao(r_competitividade), _tom_indice(r_competitividade.valor, False))
+    _kpi(kpis[2], "Potencial de Crescimento", f"{r_potencial.valor:.0f}/100", _rotulo_classificacao(r_potencial),
+         _tom_indice(r_potencial.valor, False))
+    _kpi(kpis[3], "Risco Reputacional", f"{r_risco.valor:.0f}/100", _rotulo_classificacao(r_risco),
+         _tom_indice(r_risco.valor, True))
+
+    st.subheader("Os 20 indices")
+    linhas = [
+        {
+            "Indice": nome.replace("_", " ").title(),
+            "Nota": r.valor,
+            "Classificacao": _rotulo_classificacao(r),
+            "Cobertura": f"{r.cobertura_pct:.0f}%",
+            "Leitura": "nota alta = pior" if r.pior_quando_alto else "nota alta = melhor",
+        }
+        for nome, r in indices.indices.items()
+    ]
+    st.dataframe(pd.DataFrame(linhas), use_container_width=True, hide_index=True)
+
+    st.subheader("Arquetipo politico-eleitoral")
+    if arquetipo.arquetipo_principal:
+        st.markdown(f"**Principal:** {arquetipo.arquetipo_principal.replace('_', ' ').title()}")
+        if arquetipo.arquetipos_secundarios:
+            secundarios_fmt = ", ".join(a.replace("_", " ").title() for a in arquetipo.arquetipos_secundarios)
+            st.markdown(f"**Secundarios:** {secundarios_fmt}")
+        if arquetipo.cargos_compativeis:
+            st.markdown(f"**Cargos compativeis (arquetipo principal):** {', '.join(arquetipo.cargos_compativeis)}")
+        st.caption(f"Evidencia: `{arquetipo.evidencias.get(arquetipo.arquetipo_principal)}`")
+    else:
+        st.markdown("Nenhum arquetipo com evidencia suficiente nas respostas informadas.")
+
+    st.divider()
+    st.subheader("Rivais projetados e compatibilidade partidaria")
+    _explicacao(
+        "Diferente dos indices acima, esta secao <strong>nao e autoavaliacao</strong>: usa dado "
+        "real de votacao do TSE da disputa comparavel mais recente para o cargo/UF/municipio "
+        "informados (mesmo motor de busca do resto do SIET). A unica premissa hipotetica, "
+        "sempre declarada, e que essa disputa passada e um proxy razoavel de quem disputara a "
+        "proxima eleicao."
+    )
+
+    resultado_rivais = identificar_rivais_projetados(resposta.identificacao)
+    disputa = resultado_rivais.disputa
+    if disputa.ano:
+        st.caption(
+            f"Disputa comparavel usada: {disputa.cargo_tse} / {disputa.uf}"
+            f"{' / ' + disputa.municipio_nome if disputa.municipio_nome else ''} / {disputa.ano}"
+        )
+    for aviso in disputa.avisos:
+        st.warning(aviso)
+
+    if resultado_rivais.rivais:
+        st.markdown("**Rivais projetados (top votados na disputa comparavel real)**")
+        linhas_rivais = [
+            {
+                "Colocacao": r.colocacao,
+                "Nome de urna": r.candidatura.nome_urna,
+                "Partido": r.candidatura.partido_sigla,
+                "Votos (disputa comparavel)": r.candidatura.total_votos,
+                "Resultado (disputa comparavel)": r.candidatura.resultado_final,
+                "Indice de rivalidade": r.indice_rivalidade,
+                "Classificacao": r.classificacao.replace("_", " ").title(),
+                "Tipo": ", ".join(t.replace("_", " ") for t in r.tipos),
+            }
+            for r in resultado_rivais.rivais
+        ]
+        st.dataframe(pd.DataFrame(linhas_rivais), use_container_width=True, hide_index=True)
+
+    if resposta.identificacao.partido_sigla:
+        resultado_partido = avaliar_compatibilidade_partidaria(
+            resposta.identificacao.partido_sigla,
+            resposta.identificacao.cargo_pretendido,
+            resposta.identificacao.uf,
+            resposta.identificacao.municipio_base,
+        )
+        st.markdown(f"**Compatibilidade partidaria real: {resultado_partido.partido_sigla}**")
+        for aviso in resultado_partido.avisos:
+            if aviso not in disputa.avisos:
+                st.warning(aviso)
+        if resultado_partido.n_candidatos_partido:
+            kpis_partido = st.columns(4)
+            _kpi(kpis_partido[0], "Candidatos do partido (disputa comparavel)", str(resultado_partido.n_candidatos_partido))
+            _kpi(kpis_partido[1], "Eleitos do partido (disputa comparavel)", str(resultado_partido.n_eleitos_partido))
+            _kpi(kpis_partido[2], "Taxa de sucesso do partido",
+                 f"{resultado_partido.taxa_sucesso_partido * 100:.0f}%" if resultado_partido.taxa_sucesso_partido is not None else "n/d")
+            _kpi(kpis_partido[3], "Melhor colocacao do partido",
+                 f"{resultado_partido.melhor_colocacao_partido}o lugar" if resultado_partido.melhor_colocacao_partido else "n/d")
+            if resultado_partido.piso_real_da_disputa is not None and resultado_partido.votos_melhor_candidato_partido is not None:
+                st.caption(
+                    f"Piso real de votos entre os eleitos da disputa comparavel: "
+                    f"{_fmt(resultado_partido.piso_real_da_disputa)}. Melhor candidato do partido nessa "
+                    f"disputa teve {_fmt(resultado_partido.votos_melhor_candidato_partido)} votos."
+                )
+    else:
+        st.caption("Informe a sigla do partido no formulario acima para ver a compatibilidade partidaria real.")
+
+
+# --------------------------------------------------------- Modulo Pautas
+_PAUTAS_LABELS = {
+    pauta_id: dados["label"] for pauta_id, dados in policy_areas_config()["pautas"].items()
+}
+
+
+def _pagina_questionario_pauta() -> None:
+    """Modo 3 (Pautas/Plataforma) - questionario de pauta de politica
+    publica (secao 10 do briefing de expansao SIET). NAO depende de
+    nenhuma candidatura real do TSE. Ver ETAPA1_ARQUITETURA.md e
+    src/questionnaire/policy_questionnaire.py."""
+    st.title("Questionario de Pauta / Plataforma")
+    _explicacao(
+        "Autoavaliacao estruturada da pauta - <strong>nao e dado oficial de politica "
+        "publica</strong> (isso exigiria conectores DATASUS/INEP/SICONFI/SNIS, nao "
+        "integrados nesta etapa). A UNICA parte com fonte externa verificavel e a "
+        "competencia federativa/base legal da pauta, lida de config/policy_areas.yaml - "
+        "nunca digitada aqui. Perguntas deixadas em \"-- nao respondido --\" ficam de "
+        "fora do calculo de cada indice."
+    )
+
+    with st.form("form_questionario_pauta"):
+        st.subheader("1. Identificacao da pauta")
+        c1, c2 = st.columns(2)
+        pauta_id = c1.selectbox(
+            "Pauta", list(_PAUTAS_LABELS.keys()), format_func=lambda k: _PAUTAS_LABELS[k], key="p_pauta_id"
+        )
+        cargo_analisado = c2.selectbox("Cargo analisado", _CARGOS_MODO1, key="p_cargo")
+
+        problema_central = st.text_area("Problema central que a proposta pretende enfrentar", key="p_problema")
+        c3, c4 = st.columns(2)
+        publico_afetado = c3.text_input("Publico afetado (agregado, nunca individual)", key="p_publico")
+        territorio_afetado = c4.text_input("Territorio afetado", key="p_territorio")
+        proposta_principal = st.text_area("Proposta principal", key="p_proposta_principal")
+        propostas_complementares = st.text_input(
+            "Propostas complementares (separadas por virgula)", key="p_propostas_complementares"
+        )
+
+        with st.expander("2. Gravidade, urgencia e aderencia"):
+            gravidade_problema = _nivel("Gravidade do problema", "p_gravidade")
+            urgencia = _nivel("Urgencia", "p_urgencia")
+            abrangencia_territorial = _nivel("Abrangencia territorial do problema", "p_abrangencia")
+            aderencia_candidato = _nivel("Aderencia a trajetoria do candidato", "p_aderencia")
+            credibilidade_candidato = _nivel("Credibilidade do candidato nesta pauta", "p_credibilidade")
+            experiencia_anterior_candidato = _nivel("Experiencia anterior do candidato com o tema", "p_experiencia")
+
+        with st.expander("3. Concorrencia e diferenciacao"):
+            saturacao_outros_candidatos = _nivel(
+                "Quanto outros candidatos ja ocupam esta pauta (saturacao)", "p_saturacao"
+            )
+            diferenciacao = _nivel("Diferenciacao desta proposta frente as existentes", "p_diferenciacao")
+
+        with st.expander("4. Viabilidade e risco"):
+            dados_comprovam_problema = _simnao("Existem dados que comprovam o problema?", "p_dados_comprovam")
+            existe_estimativa_custo = _simnao("Existe estimativa de custo?", "p_custo")
+            existe_fonte_financiamento = _simnao("Existe fonte de financiamento identificada?", "p_financiamento")
+            existe_prazo_definido = _simnao("Existe prazo definido?", "p_prazo")
+            existe_indicador_resultado = _simnao("Existe indicador de resultado?", "p_indicador")
+            existe_meta_definida = _simnao("Existe meta definida?", "p_meta")
+            depende_outro_ente = _simnao("A proposta depende de outro ente federativo?", "p_depende_outro_ente")
+            exige_alteracao_legislativa = _simnao("A proposta exige alteracao legislativa?", "p_exige_lei")
+            exige_parceria = _simnao("A proposta exige parceria (privada/terceiro setor)?", "p_exige_parceria")
+            risco_juridico = _nivel("Risco juridico percebido", "p_risco_juridico")
+            risco_fiscal = _nivel("Risco fiscal percebido", "p_risco_fiscal")
+            risco_rejeicao = _nivel("Risco de rejeicao publica percebido", "p_risco_rejeicao")
+
+        with st.expander("5. Comunicacao e coerencia"):
+            potencial_comunicacao = _nivel("Potencial de comunicacao da pauta", "p_potencial_comunicacao")
+            potencial_mobilizacao = _nivel("Potencial de mobilizacao da pauta", "p_potencial_mobilizacao")
+            coerencia_com_outras_pautas = _nivel(
+                "Coerencia com as demais pautas da plataforma", "p_coerencia"
+            )
+
+        enviado = st.form_submit_button("Calcular prioridade", type="primary")
+
+    if not enviado:
+        return
+
+    proposta = PropostaPauta(
+        pauta_id=pauta_id,
+        cargo_analisado=cargo_analisado,
+        problema_central=problema_central,
+        publico_afetado=publico_afetado,
+        territorio_afetado=territorio_afetado,
+        proposta_principal=proposta_principal,
+        propostas_complementares=[t.strip() for t in propostas_complementares.split(",") if t.strip()],
+        gravidade_problema=gravidade_problema,
+        urgencia=urgencia,
+        abrangencia_territorial=abrangencia_territorial,
+        aderencia_candidato=aderencia_candidato,
+        credibilidade_candidato=credibilidade_candidato,
+        experiencia_anterior_candidato=experiencia_anterior_candidato,
+        saturacao_outros_candidatos=saturacao_outros_candidatos,
+        diferenciacao=diferenciacao,
+        risco_juridico=risco_juridico,
+        risco_fiscal=risco_fiscal,
+        risco_rejeicao=risco_rejeicao,
+        potencial_comunicacao=potencial_comunicacao,
+        potencial_mobilizacao=potencial_mobilizacao,
+        coerencia_com_outras_pautas=coerencia_com_outras_pautas,
+        dados_comprovam_problema=dados_comprovam_problema,
+        existe_estimativa_custo=existe_estimativa_custo,
+        existe_fonte_financiamento=existe_fonte_financiamento,
+        existe_prazo_definido=existe_prazo_definido,
+        existe_indicador_resultado=existe_indicador_resultado,
+        existe_meta_definida=existe_meta_definida,
+        depende_outro_ente=depende_outro_ente,
+        exige_alteracao_legislativa=exige_alteracao_legislativa,
+        exige_parceria=exige_parceria,
+    )
+
+    indices = calcular_indices_pauta(proposta)
+    classificacao = classificar_pauta(indices)
+    plataforma = montar_plataforma(proposta, indices, classificacao)
+
+    st.divider()
+    st.subheader("Resultado")
+    st.caption(
+        f"Taxa de preenchimento do questionario: {proposta.taxa_preenchimento()}% - "
+        f"Cobertura geral dos indices: {indices.cobertura_geral_pct}%"
+    )
+    st.warning(
+        "Aviso metodologico: os indices abaixo sao autoavaliacao categorica declarada "
+        "neste formulario - nao sao dado oficial de politica publica."
+    )
+
+    r_geral = indices["indice_geral_prioridade"]
+    r_relevancia = indices["relevancia_pauta"]
+    r_viab_fiscal = indices["viabilidade_fiscal"]
+    r_risco_rejeicao = indices["risco_de_rejeicao"]
+    kpis = st.columns(4)
+    _kpi(kpis[0], "Indice Geral de Prioridade", f"{r_geral.valor:.0f}/100", _rotulo_classificacao(r_geral),
+         _tom_indice(r_geral.valor, False))
+    _kpi(kpis[1], "Relevancia da Pauta", f"{r_relevancia.valor:.0f}/100", _rotulo_classificacao(r_relevancia),
+         _tom_indice(r_relevancia.valor, False))
+    _kpi(kpis[2], "Viabilidade Fiscal", f"{r_viab_fiscal.valor:.0f}/100", _rotulo_classificacao(r_viab_fiscal),
+         _tom_indice(r_viab_fiscal.valor, False))
+    _kpi(kpis[3], "Risco de Rejeicao", f"{r_risco_rejeicao.valor:.0f}/100", _rotulo_classificacao(r_risco_rejeicao),
+         _tom_indice(r_risco_rejeicao.valor, True))
+
+    st.subheader("Os 20 indices")
+    linhas = [
+        {
+            "Indice": nome.replace("_", " ").title(),
+            "Nota": r.valor,
+            "Classificacao": _rotulo_classificacao(r),
+            "Cobertura": f"{r.cobertura_pct:.0f}%",
+            "Leitura": "nota alta = pior" if r.pior_quando_alto else "nota alta = melhor",
+        }
+        for nome, r in indices.indices.items()
+    ]
+    st.dataframe(pd.DataFrame(linhas), use_container_width=True, hide_index=True)
+
+    st.subheader("Classificacao na matriz de priorizacao")
+    if classificacao.classificacao_principal:
+        st.markdown(f"**Principal:** {classificacao.classificacao_principal.replace('_', ' ').title()}")
+        if classificacao.tambem_aplicavel:
+            outros_fmt = ", ".join(c.replace("_", " ").title() for c in classificacao.tambem_aplicavel)
+            st.markdown(f"**Tambem aplicavel:** {outros_fmt}")
+        st.caption(f"Evidencia: `{classificacao.evidencias.get(classificacao.classificacao_principal)}`")
+    else:
+        st.markdown("Nenhuma classificacao da matriz com evidencia suficiente nas respostas informadas.")
+
+    st.subheader("Plataforma gerada")
+    if plataforma.gate.aprovado:
+        st.success(f"Gate de competencia do cargo: APROVADO - {plataforma.gate.motivo}")
+    else:
+        st.error(f"Gate de competencia do cargo: REPROVADO - {plataforma.gate.motivo}")
+
+    st.markdown(f"**Orgao responsavel:** {plataforma.orgao_responsavel}")
+    st.markdown(f"**Publico beneficiado:** {plataforma.publico_beneficiado}")
+    st.markdown(f"**Territorio:** {plataforma.territorio}")
+    st.markdown(f"**Custo estimado:** {plataforma.custo_estimado}")
+    st.markdown(f"**Fonte de recursos:** {plataforma.fonte_recursos}")
+    st.markdown(f"**Prazo:** {plataforma.prazo}")
+    st.markdown(f"**Indicadores:** {plataforma.indicadores}")
+    st.markdown(f"**Metas:** {plataforma.metas}")
+    st.markdown(f"**Parceiros:** {plataforma.parceiros}")
+    st.markdown(f"**Riscos:** {plataforma.riscos}")
+    with st.expander("Campos que exigem elaboracao qualitativa adicional (nao gerados automaticamente)"):
+        st.markdown(f"**Causas:** {plataforma.causas}")
+        st.markdown(f"**Consequencias:** {plataforma.consequencias}")
+        st.markdown(f"**Objetivos especificos:** {plataforma.objetivos_especificos}")
+        st.markdown(f"**Etapas:** {plataforma.etapas}")
+    st.caption(f"Justificativa tecnica: {plataforma.justificativa_tecnica}")
+
+
+# ------------------------------------------------------- Modulo Integracao
+def _pagina_matriz_integrada() -> None:
+    """Modo 4 (Integracao) - Matriz Candidato x Territorio x Pauta (secao
+    15 do briefing de expansao SIET). Cruza um subconjunto do Modo 1
+    (identificacao + autoridade tematica), uma pauta do Modo 3 e o perfil
+    territorial REAL (Censo IBGE/RAIS-CAGED) do municipio informado. Ver
+    ETAPA1_ARQUITETURA.md e src/integration/candidate_territory_policy_matrix.py.
+
+    Escopo desta etapa (decisao explicita, nao lacuna escondida): uma pauta
+    por analise (o backend ja aceita uma lista - a UI de comparar varias
+    pautas de uma vez fica para uma proxima etapa) e so os 2 campos do Modo
+    1 que alimentam o indice de Autoridade Tematica (quem quiser o
+    perfil de autoavaliacao completo usa o Modo 1 por si)."""
+    st.title("Matriz Integrada: Candidato x Territorio x Pauta")
+    _explicacao(
+        "Cruza tres origens de dado DIFERENTES, cada uma rotulada como e: "
+        "(1) autoavaliacao do candidato e da pauta (Modos 1 e 3, categorica, "
+        "declarada aqui); (2) perfil territorial REAL do municipio (Censo IBGE 2022 "
+        "+ RAIS/CAGED, nao ponderado por voto - o candidato ainda nao disputou, "
+        "ver nota metodologica do modulo). O indice de compatibilidade candidato-pauta "
+        "so combina as duas autoavaliacoes; o perfil territorial e mostrado ao lado, "
+        "nunca misturado num unico numero com autoavaliacao."
+    )
+
+    with st.form("form_matriz_integrada"):
+        st.subheader("1. Identificacao")
+        c1, c2, c3 = st.columns(3)
+        cargo_pretendido = c1.selectbox("Cargo pretendido", _CARGOS_MODO1, key="m_cargo")
+        uf = c2.selectbox("UF", list(UF_NOME.keys()), key="m_uf")
+        municipio_base = c3.text_input("Municipio-base", key="m_municipio")
+
+        st.subheader("2. Autoridade tematica do candidato (resumo do Modo 1)")
+        temas = st.text_input("Temas de maior identificacao (separados por virgula)", key="m_temas")
+        c4, c5 = st.columns(2)
+        with c4:
+            projetos_realizados = _nivel("Projetos realizados no tema da pauta abaixo", "m_projetos")
+        with c5:
+            resultados_concretos = _nivel("Resultados concretos entregues no tema", "m_resultados")
+
+        st.subheader("3. Pauta a cruzar")
+        c6, c7 = st.columns(2)
+        pauta_id = c6.selectbox(
+            "Pauta", list(_PAUTAS_LABELS.keys()), format_func=lambda k: _PAUTAS_LABELS[k], key="m_pauta_id"
+        )
+        territorio_afetado = c7.text_input("Territorio afetado pela pauta", key="m_territorio_pauta")
+        c8, c9 = st.columns(2)
+        with c8:
+            aderencia_candidato = _nivel("Aderencia desta pauta a trajetoria do candidato", "m_aderencia")
+        with c9:
+            gravidade_problema = _nivel("Gravidade do problema que a pauta enfrenta", "m_gravidade")
+
+        enviado = st.form_submit_button("Calcular matriz", type="primary")
+
+    if not enviado:
+        return
+
+    identificacao = IdentificacaoAnalise(cargo_pretendido=cargo_pretendido, uf=uf, municipio_base=municipio_base or "-- nao informado --")
+    resposta = RespostaQuestionario(
+        identificacao=identificacao,
+        trajetoria=Trajetoria(projetos_realizados=projetos_realizados, resultados_concretos=resultados_concretos),
+        posicionamento=Posicionamento(temas_identificacao=[t.strip() for t in temas.split(",") if t.strip()]),
+    )
+    indices_candidato = calcular_indices_candidato(resposta)
+
+    proposta = PropostaPauta(
+        pauta_id=pauta_id, cargo_analisado=cargo_pretendido,
+        territorio_afetado=territorio_afetado, aderencia_candidato=aderencia_candidato,
+        gravidade_problema=gravidade_problema,
+    )
+    indices_pauta = calcular_indices_pauta(proposta)
+    gate = verificar_gate_competencia(proposta.pauta_id, proposta.cargo_analisado)
+
+    resultado = montar_matriz_candidato_territorio_pauta(identificacao, indices_candidato, [(proposta, indices_pauta, gate)])
+
+    st.divider()
+    st.subheader("Perfil territorial real do municipio")
+    perfil = resultado.perfil_territorial
+    for aviso in perfil.avisos:
+        st.warning(aviso)
+    if perfil.indicadores_piramide_maslow:
+        st.caption(
+            f"{perfil.municipio}/{perfil.uf} - {perfil.n_setores_censitarios} setores censitarios (Censo IBGE 2022). "
+            "Media ponderada por populacao real do setor - NAO ponderada por voto (sem candidatura real ainda)."
+        )
+        linhas_territorio = [
+            {"Indicador": var.replace("_", " ").title(), "Valor real (municipio)": valor}
+            for var, valor in perfil.indicadores_piramide_maslow.items()
+        ]
+        st.dataframe(pd.DataFrame(linhas_territorio), use_container_width=True, hide_index=True)
+    if perfil.perfil_economico and perfil.perfil_economico.disponivel:
+        pe = perfil.perfil_economico
+        st.caption(
+            f"Contexto economico real (RAIS/CAGED): {_fmt(pe.vinculos_ativos_total)} vinculos formais ativos, "
+            f"tendencia de emprego '{pe.tendencia}'."
+        )
+
+    st.subheader("Compatibilidade candidato x pauta")
+    for c in resultado.compatibilidades:
+        if c.elegivel_pelo_cargo:
+            st.success(f"Gate de competencia do cargo: APROVADO - {c.motivo_elegibilidade}")
+        else:
+            st.error(f"Gate de competencia do cargo: REPROVADO - {c.motivo_elegibilidade}")
+
+        kpis = st.columns(4)
+        _kpi(kpis[0], "Indice de Compatibilidade", f"{c.indice_compatibilidade:.0f}/100",
+             c.classificacao.replace("_", " ").title(), _tom_indice(c.indice_compatibilidade, False))
+        _kpi(kpis[1], "Autoridade Tematica (Modo 1)",
+             f"{c.autoridade_tematica_candidato:.0f}/100" if c.autoridade_tematica_candidato is not None else "n/d")
+        _kpi(kpis[2], "Aderencia a Pauta (Modo 3)",
+             f"{c.aderencia_candidato_pauta:.0f}/100" if c.aderencia_candidato_pauta is not None else "n/d")
+        _kpi(kpis[3], "Prioridade da Pauta (Modo 3)", f"{c.indice_geral_prioridade_pauta:.0f}/100")
+
+        if c.mesmo_territorio_declarado is False:
+            st.warning(
+                "O territorio-base do candidato e o territorio afetado declarado na pauta "
+                "parecem diferentes - confira se a pauta faz sentido para este municipio-base."
+            )
+        st.caption(f"Cobertura do indice de compatibilidade: {c.cobertura_pct}%")
 
 
 @st.cache_data(show_spinner=False)
@@ -434,6 +1110,31 @@ def _carregar_demografia_estadual(
 def _carregar_perfil_eleitorado_uf(uf: str) -> pd.DataFrame:
     return carregar_perfil_eleitorado_secao(uf)
 
+
+st.sidebar.header("Modo de analise")
+_modo_app = st.sidebar.radio(
+    "O que voce quer analisar?",
+    [
+        "Candidatura ja disputada (TSE)",
+        "Questionario de candidato (nova candidatura)",
+        "Questionario de pauta/plataforma",
+        "Matriz Integrada (Candidato x Territorio x Pauta)",
+    ],
+    key="v2_modo_app",
+)
+st.sidebar.divider()
+
+if _modo_app == "Questionario de candidato (nova candidatura)":
+    _pagina_questionario_candidato()
+    st.stop()
+
+if _modo_app == "Questionario de pauta/plataforma":
+    _pagina_questionario_pauta()
+    st.stop()
+
+if _modo_app == "Matriz Integrada (Candidato x Territorio x Pauta)":
+    _pagina_matriz_integrada()
+    st.stop()
 
 st.sidebar.header("Selecione a disputa")
 
@@ -1609,6 +2310,39 @@ elif secao == "Estatistica Avancada":
                 else:
                     st.info("Segmentacao de clusters indisponivel - potencial nao calculado.")
 
+            with st.container(border=True):
+                st.subheader("Cenarios de votos (simulacao de Monte Carlo)")
+                _explicacao(
+                    "Sorteia repetidamente os coeficientes reais da regressao linear acima "
+                    "(distribuicao Normal em torno de cada coeficiente e seu proprio erro-padrao "
+                    "ja estimado) e aplica aos territorios de maior potencial - gera uma faixa "
+                    "conservador/mediano/otimista que reflete a INCERTEZA ESTATISTICA real do "
+                    "modelo, nao uma previsao de turnout futuro ou de comportamento de rivais."
+                )
+                if reg and resultado_clustering and not potencial.empty:
+                    sim = simular_regressao_linear(reg, base_territorio, nivel_estatistica, n_simulacoes=2000)
+                    if sim is None:
+                        st.info("Nao foi possivel simular (variaveis do modelo indisponiveis nos dados).")
+                    else:
+                        territorios_potencial = base_territorio[
+                            base_territorio[nivel_estatistica].isin(potencial[nivel_estatistica])
+                        ]
+                        cenario = cenario_agregado_votos(
+                            sim, territorios_potencial, nivel_estatistica, "votos_validos_territorio",
+                        )
+                        if cenario:
+                            c1, c2, c3, c4 = st.columns(4)
+                            _kpi(c1, "Votos reais hoje (nesses territorios)", _fmt(cenario.votos_reais_atuais))
+                            _kpi(c2, "Cenario conservador (p5)", _fmt(cenario.conservador))
+                            _kpi(c3, "Cenario mediano (p50)", _fmt(cenario.mediano))
+                            _kpi(c4, "Cenario otimista (p95)", _fmt(cenario.otimista))
+                            st.caption(f"{cenario.n_territorios} territorios de maior potencial, {sim.n_simulacoes} simulacoes.")
+                        sim_potencial = sim.territorios[sim.territorios[nivel_estatistica].isin(potencial[nivel_estatistica])]
+                        st.dataframe(sim_potencial, use_container_width=True)
+                        st.caption(sim.limitacoes)
+                else:
+                    st.info("Regressao linear, clusters e territorios de potencial precisam estar disponiveis para simular cenarios.")
+
 # ===================================================== Abordagem de Maslow
 elif secao == "Abordagem de Maslow":
     if not uf_tem_malha_completa(candidatura.uf):
@@ -1875,6 +2609,9 @@ elif secao == "Relatorio":
     rivais_sim_rel = None
     delta_rel = None
     resultado_maslow_rel = None
+    reg_pct_rel = None
+    simulacao_mc_rel = None
+    cenario_mc_rel = None
 
     if uf_tem_malha_completa(candidatura.uf):
         pontos, enriquecido, avisos_geo = _geo()
@@ -1902,6 +2639,22 @@ elif secao == "Relatorio":
                     coluna_cluster=_COLUNA_CLUSTER_REGRESSAO,
                 )
             resultado_maslow_rel = gerar_analise_maslow(modelo_log_rel, modelo_lin_rel, corr_rel)
+
+            # regressao linear (percentual) + simulacao de Monte Carlo -
+            # sempre calculada aqui (independente do fallback de Maslow
+            # acima, que so roda o modelo linear quando o logistico falha)
+            # porque o cenario de votos (Etapa 8) precisa especificamente
+            # do modelo linear para converter % simulado em votos reais.
+            reg_pct_rel, _ = regressao_linear_votos(
+                base_territorio_rel, "pct_votos_validos_territorio", variaveis_disp,
+                coluna_cluster=_COLUNA_CLUSTER_REGRESSAO,
+            )
+            if reg_pct_rel is not None:
+                simulacao_mc_rel = simular_regressao_linear(reg_pct_rel, base_territorio_rel, _NIVEL_TERRITORIO_DEMOGRAFICO)
+                if simulacao_mc_rel is not None:
+                    cenario_mc_rel = cenario_agregado_votos(
+                        simulacao_mc_rel, base_territorio_rel, _NIVEL_TERRITORIO_DEMOGRAFICO, "votos_validos_territorio",
+                    )
     else:
         limitacoes = [f"Malha geografica nao configurada para a UF '{candidatura.uf}'."]
 
@@ -1913,6 +2666,10 @@ elif secao == "Relatorio":
     indice_terr_rel = calcular_indice_performance(terr_class_rel, hhi_rel)
     matriz_rel = matriz_candidato_territorio(candidatura, vd, ranking, nivel_relatorio, top_n_concorrentes=3)
     delta_rel = delta_vs_rivais(matriz_rel, nivel_relatorio, candidatura.nome_urna)
+    ranking_partidos_rel = ranking_partidos(ranking, vd, rd)
+    concentracao_rel = calcular_concentracao_territorial(terr_rel)
+    patrimonio_comparativo_rel = patrimonio_comparativo(candidatura, ranking, top_n=7)
+    comparativo_historico_rel = montar_comparativo_historico(candidatura, vc, vd, rd)
 
     figuras = {
         "Ranking da disputa": charts.grafico_ranking_disputa(ranking, candidatura.numero),
@@ -1941,9 +2698,14 @@ elif secao == "Relatorio":
         regressao_logistica=modelo_log_rel, clusters_narrativa=narrativa_rel,
         delta_rivais=delta_rel, bairros_potencial=potencial_rel, rivais_similaridade=rivais_sim_rel,
         maslow=resultado_maslow_rel, perfil_economico=perfil_economico_rel,
+        ranking_partidos=ranking_partidos_rel, concentracao_territorial=concentracao_rel,
+        zonas_disputa=terr_class_rel, regressao_linear=reg_pct_rel,
+        cenario_monte_carlo=cenario_mc_rel, simulacao_monte_carlo=simulacao_mc_rel,
+        patrimonio_comparativo=patrimonio_comparativo_rel,
+        comparativo_historico=comparativo_historico_rel,
     )
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
         html_bytes = gerar_relatorio_html(dados_relatorio).encode("utf-8")
         st.download_button("Baixar relatorio HTML", html_bytes, file_name=f"relatorio_{candidatura.nome_urna}.html")
@@ -1952,6 +2714,24 @@ elif secao == "Relatorio":
         gerar_relatorio_pdf(dados_relatorio, pdf_path)
         st.download_button("Baixar relatorio PDF", pdf_path.read_bytes(), file_name=pdf_path.name)
     with col3:
+        completo_bytes = gerar_relatorio_completo_html(dados_relatorio).encode("utf-8")
+        st.download_button(
+            "Baixar relatorio completo (rico)", completo_bytes,
+            file_name=f"relatorio_completo_{candidatura.nome_urna}.html",
+        )
+    with col4:
+        estrategia_bytes = gerar_relatorio_estrategia_html(dados_relatorio).encode("utf-8")
+        st.download_button(
+            "Baixar relatorio de estrategia", estrategia_bytes,
+            file_name=f"relatorio_estrategia_{candidatura.nome_urna}.html",
+        )
+    with col5:
+        comparativo_bytes = gerar_relatorio_comparativo_html(dados_relatorio).encode("utf-8")
+        st.download_button(
+            "Baixar relatorio comparativo", comparativo_bytes,
+            file_name=f"relatorio_comparativo_{candidatura.nome_urna}.html",
+        )
+    with col6:
         planilhas = {
             "Resumo": pd.DataFrame([vars(rg)]),
             "Ranking": ranking,

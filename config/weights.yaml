@@ -1,0 +1,210 @@
+# Pesos e regras normativas do Modulo Candidato (Modo 1 do briefing de
+# expansao - questionario de autoavaliacao, secoes 8/11/12).
+#
+# ATENCAO METODOLOGICA (ver ETAPA1_ARQUITETURA.md secao 4): os indices deste
+# arquivo NAO medem fato eleitoral verificavel (diferente de indicators.yaml,
+# que pondera dado real do TSE/IBGE). Eles pontuam RESPOSTAS DE
+# AUTOAVALIACAO CATEGORICA do proprio candidato. A tabela
+# escala_categorica abaixo e uma REGRA DE PONTUACAO NORMATIVA e configuravel
+# - nunca uma medicao objetiva. Todo indice calculado a partir daqui deve
+# ser rotulado como "autoavaliacao" na interface e nos relatorios.
+
+# Escala padrao de 5 faixas (NivelIntensidade em
+# candidate_questionnaire.py), reaproveitada por TODAS as perguntas
+# categoricas do questionario - inclusive as que o briefing rotula com
+# nomes proprios (secao 8.3: "nenhuma estrutura / inicial / intermediaria
+# / consolidada"), que sao tratadas aqui como as mesmas nenhuma/baixa/
+# moderada/alta ja usadas no resto do questionario. Unica regra de
+# conversao categoria -> nota 0-100 (nunca uma tabela diferente por
+# pergunta, que tornaria os indices incomparaveis entre si sem motivo) -
+# ver NivelIntensidade em src/questionnaire/candidate_questionnaire.py,
+# que so tem estes 5 valores (nao ha enum separado para "inicial/
+# intermediaria/consolidada" - propositalmente, mesma razao acima).
+escala_categorica:
+  nenhuma: 0
+  baixa: 25
+  moderada: 50
+  alta: 75
+  muito_alta: 100
+
+escala_binaria:
+  nao: 0
+  sim: 100
+
+# Normalizacao de perguntas numericas (nao categoricas) do questionario.
+# numero_territorios_presenca e a unica pergunta do questionario respondida
+# como contagem (nao faixa) - normalizada linearmente ate um teto de
+# referencia, documentado aqui em vez de "magic number" no codigo. Teto
+# escolhido de forma normativa (equivalente a "presenca consolidada" para
+# a maioria dos cargos municipais/estaduais); configuravel sem alterar
+# codigo.
+normalizacao_numerica:
+  numero_territorios_presenca:
+    teto_referencia: 15   # numero de bairros/cidades a partir do qual a nota satura em 100
+
+indices_candidato:
+  # cada indice "direto" lista os campos do questionario (ver
+  # candidate_questionnaire.py) e o peso de cada um dentro do indice.
+  # Pesos de um indice somam 1.0 - validado em candidate_indices.py.
+
+  conhecimento_publico:
+    pesos:
+      conhecimento_espontaneo: 0.7
+      seguidores_redes: 0.3
+
+  capilaridade_territorial:
+    pesos:
+      numero_territorios_presenca: 0.5
+      estrutura_bairros: 0.5
+
+  mobilizacao:
+    pesos:
+      apoiadores_mobilizaveis: 0.6
+      capacidade_eventos: 0.4
+
+  estrutura_politica:
+    pesos:
+      relacionamento_liderancas: 0.3
+      relacionamento_vereadores: 0.25
+      relacionamento_prefeitos: 0.25
+      relacionamento_deputados: 0.2
+
+  estrutura_operacional:
+    pesos:
+      equipe: 0.3
+      transporte: 0.2
+      locais_reuniao: 0.2
+      audiovisual: 0.3
+
+  capacidade_financeira_legal:
+    pesos:
+      capacidade_investimento_legal: 0.5
+      capacidade_arrecadacao: 0.5
+
+  comunicacao:
+    pesos:
+      oratoria: 0.25
+      desempenho_videos: 0.2
+      entrevistas: 0.2
+      debates: 0.15
+      resposta_criticas: 0.2
+
+  presenca_digital:
+    pesos:
+      seguidores_redes: 0.3
+      engajamento: 0.3
+      producao_conteudo: 0.2
+      equipe_comunicacao: 0.2
+
+  autoridade_tematica:
+    pesos:
+      projetos_realizados: 0.5
+      resultados_concretos: 0.5
+
+  experiencia_politica:
+    pesos:
+      tempo_atuacao_publica: 0.4
+      mandato_anterior: 0.35
+      experiencia_politica_geral: 0.25
+
+  experiencia_administrativa:
+    pesos:
+      atuacao_administrativa: 1.0
+
+  relacionamento_institucional:
+    pesos:
+      relacionamento_entidades: 0.5
+      liderancas_regionais: 0.5
+
+  apoio_partidario:
+    pesos:
+      partido_definido: 0.3
+      apoio_do_partido: 0.7
+
+  disponibilidade:
+    pesos:
+      disponibilidade_tempo: 0.6
+      disponibilidade_viagens: 0.4
+
+  resiliencia:
+    pesos:
+      resistencia_ataques: 0.5
+      disciplina: 0.5
+
+  # risco_reputacional e rejeicao_potencial sao os 2 unicos indices onde
+  # nota ALTA = PIOR (mesma convencao ja usada no IVE das sessoes
+  # anteriores) - o codigo em candidate_indices.py inverte a escala.
+  risco_reputacional:
+    pesos:
+      rejeicao_percebida: 0.6
+      indisciplina: 0.4   # inverso de disciplina
+
+  rejeicao_potencial:
+    pesos:
+      rejeicao_percebida: 1.0
+
+  # indices DERIVADOS (recombinam os indices diretos acima, nao pedem
+  # pergunta nova - ver ETAPA1_ARQUITETURA.md secao 5).
+  potencial_crescimento:
+    formula: "gap entre conhecimento_publico atual e media(estrutura_politica, mobilizacao, estrutura_operacional)"
+
+  competitividade_inicial:
+    pesos:
+      conhecimento_publico: 0.3
+      capilaridade_territorial: 0.25
+      estrutura_politica: 0.25
+      comunicacao: 0.2
+
+  prontidao_eleitoral:
+    # indice-sintese (equivalente ao "Indice Geral de Viabilidade
+    # Eleitoral" da secao 21 do briefing, mas no nivel do Modulo Candidato)
+    pesos:
+      competitividade_inicial: 0.25
+      estrutura_operacional: 0.15
+      capacidade_financeira_legal: 0.10
+      apoio_partidario: 0.10
+      experiencia_politica: 0.10
+      experiencia_administrativa: 0.10
+      autoridade_tematica: 0.10
+      disponibilidade: 0.10
+    penalidade_risco_reputacional: 0.20  # multiplicador sobre risco_reputacional/100
+
+limites_classificacao:
+  # identico em faixa a todo o resto do SIET (indicators.yaml) - mantido
+  # aqui tambem para o modulo candidato nao usar uma escala diferente.
+  muito_alto: 80
+  alto: 60
+  moderado: 40
+  baixo: 20
+  critico: 0
+
+# Regras de classificacao de arquetipo (secao 12 do briefing). Cada
+# arquetipo e definido por uma condicao sobre os indices ja calculados -
+# nunca uma pergunta nova. Regras avaliadas em ordem; um candidato pode
+# se encaixar em varios arquetipos (principal = primeira regra satisfeita
+# com maior "forca", secundarios = demais regras satisfeitas).
+arquetipos:
+  lideranca_comunitaria:
+    condicao: "capilaridade_territorial >= 60 and mobilizacao >= 60 and presenca_digital < 60"
+    cargos_compativeis: ["Vereador", "Deputado Estadual"]
+  especialista_tecnico:
+    condicao: "autoridade_tematica >= 70 and experiencia_administrativa >= 50"
+    cargos_compativeis: ["Deputado Estadual", "Deputado Federal", "Secretario (indicacao)"]
+  comunicador:
+    condicao: "comunicacao >= 70 and presenca_digital >= 70"
+    cargos_compativeis: ["Deputado Federal", "Deputado Estadual", "Vereador"]
+  gestor_publico:
+    condicao: "experiencia_administrativa >= 70 and experiencia_politica >= 50"
+    cargos_compativeis: ["Prefeito", "Governador", "Deputado Federal"]
+  lideranca_digital:
+    condicao: "presenca_digital >= 75 and capilaridade_territorial < 40"
+    cargos_compativeis: ["Deputado Federal", "Deputado Estadual"]
+  candidato_partidario:
+    condicao: "apoio_partidario >= 75 and estrutura_politica >= 60"
+    cargos_compativeis: ["Vereador", "Deputado Estadual", "Deputado Federal"]
+  candidatura_em_construcao:
+    condicao: "prontidao_eleitoral < 40"
+    cargos_compativeis: []
+  candidatura_de_alto_risco:
+    condicao: "risco_reputacional >= 60"
+    cargos_compativeis: []

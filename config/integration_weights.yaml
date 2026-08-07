@@ -1,0 +1,27 @@
+# Pesos da Matriz Candidato x Territorio x Pauta (Modo 4 - Integracao,
+# secao 15 do briefing de expansao SIET). Ver
+# src/integration/candidate_territory_policy_matrix.py.
+#
+# So o cruzamento CANDIDATO x PAUTA vira um indice numerico unico aqui - os
+# tres componentes abaixo sao todos originalmente 0-100 e da MESMA familia
+# metodologica (autoavaliacao estruturada dos Modos 1 e 3, ja calculada por
+# candidate_indices.py/policy_indices.py, nunca recalculada aqui a partir
+# de resposta bruta). O cruzamento TERRITORIO x PAUTA NAO tem uma entrada
+# aqui de proposito: misturar dado real de Censo/RAIS-CAGED (Territorio)
+# com autoavaliacao (Candidato/Pauta) num unico numero fabricaria uma
+# equivalencia que os dados nao sustentam - por isso o modulo mostra o
+# perfil territorial real ao lado da pauta, sem compor um escore unico.
+
+indice_compatibilidade_candidato_pauta:
+  pesos:
+    autoridade_tematica_candidato: 0.30   # Modo 1 - indice "Autoridade Tematica" (autoavaliacao)
+    aderencia_candidato_pauta: 0.30       # Modo 3 - campo "aderencia_candidato" da propria pauta (autoavaliacao)
+    indice_geral_prioridade_pauta: 0.40   # Modo 3 - indice geral de prioridade ja calculado da pauta
+
+limites_classificacao:
+  # mesma faixa 0-100 do resto do SIET
+  muito_alto: 80
+  alto: 60
+  moderado: 40
+  baixo: 20
+  critico: 0

@@ -310,11 +310,35 @@ def regressao_logistica_bom_desempenho(
             )
         ]
 
+    try:
+        odds_ratios = [round(math.exp(c), 3) for c in modelo.params.values]
+    except OverflowError:
+        # Mesma situacao pratica do "nao convergiu" acima (coeficiente
+        # instavel/nao-finito), so que aqui o statsmodels nao levanta
+        # excecao no fit() - so emite ConvergenceWarning e retorna um
+        # coeficiente extremo (quase-separacao perfeita entre as classes).
+        # exp() desse coeficiente estoura o range de float antes de virar
+        # odds ratio - tratado como o mesmo "modelo nao disponivel" que o
+        # resto desta funcao ja usa, nunca um valor fabricado (ex.: inf).
+        logger.warning("Regressao logistica nao convergiu: coeficiente extremo, odds_ratio nao finito.")
+        return None, issues_cluster + issues_variancia + [
+            DataIssue(
+                etapa="regressao_logistica_bom_desempenho",
+                severidade="erro",
+                mensagem=(
+                    "O modelo ajustou mas produziu coeficiente(s) extremo(s) (provavel "
+                    "quase-separacao perfeita entre as classes com esta amostra) - odds "
+                    "ratio nao finito, regressao logistica nao disponivel para esta candidatura."
+                ),
+            )
+        ]
+
     coeficientes = pd.DataFrame(
         {
             "variavel": modelo.params.index,
             "coeficiente": modelo.params.values.round(4),
-            "odds_ratio": [round(math.exp(c), 3) for c in modelo.params.values],
+            "erro_padrao": modelo.bse.values.round(4),
+            "odds_ratio": odds_ratios,
             "p_valor": modelo.pvalues.values.round(4),
         }
     )

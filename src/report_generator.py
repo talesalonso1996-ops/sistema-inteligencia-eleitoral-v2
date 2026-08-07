@@ -47,6 +47,19 @@ class DadosRelatorio:
     rivais_similaridade: pd.DataFrame | None = None
     maslow: object | None = None  # ResultadoMaslow (src/maslow_analysis.py)
     perfil_economico: object | None = None  # PerfilEconomicoMunicipio (src/economic_analysis.py)
+    # Campos aditivos (Etapa 8 - src/reports/relatorio_completo.py). Nunca
+    # lidos por gerar_relatorio_html/gerar_relatorio_pdf acima - zero
+    # regressao para quem ja usa DadosRelatorio sem preenche-los.
+    ranking_partidos: pd.DataFrame | None = None
+    concentracao_territorial: object | None = None  # ConcentracaoTerritorial (src/state_scope_indicators.py)
+    zonas_disputa: pd.DataFrame | None = None  # saida de zonas_de_disputa (src/competitor_analysis.py)
+    regressao_linear: object | None = None  # ResultadoRegressao (src/regression_models.py)
+    cenario_monte_carlo: object | None = None  # ResultadoCenarioAgregado (src/projections/monte_carlo.py)
+    simulacao_monte_carlo: object | None = None  # ResultadoSimulacaoLinear (src/projections/monte_carlo.py)
+    # Campo aditivo (Etapa 8, tipo 2 - src/reports/relatorio_estrategia.py).
+    patrimonio_comparativo: pd.DataFrame | None = None  # saida de patrimonio_comparativo (src/candidate_assets.py)
+    # Campo aditivo (Etapa 8, tipo 3 - src/reports/relatorio_comparativo.py).
+    comparativo_historico: object | None = None  # ResultadoComparativoHistorico (src/candidate_history.py)
 
 
 def _formatar_numero(valor) -> str:

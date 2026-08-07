@@ -1,0 +1,156 @@
+# Pesos e regras normativas dos 20 indices de pauta/plataforma (secao
+# 14.3 do briefing de expansao SIET). Mesma metodologia de
+# config/weights.yaml (Modulo Candidato): pesos configuraveis, redistribuidos
+# quando falta resposta, nunca preenchidos com estimativa.
+#
+# ATENCAO METODOLOGICA (ver src/questionnaire/policy_questionnaire.py):
+# estes indices pontuam AUTOAVALIACAO CATEGORICA de quem preenche o
+# formulario de pauta - nao sao dado oficial de politica publica (isso
+# exigiria os conectores DATASUS/INEP/SICONFI/SNIS da secao 6.3 do
+# briefing, nao integrados nesta etapa). Unica excecao real: a competencia
+# federativa e a base legal de cada pauta, que NAO vem deste arquivo -
+# vem de config/policy_areas.yaml, documentado e citavel.
+
+limites_classificacao:
+  muito_alto: 80
+  alto: 60
+  moderado: 40
+  baixo: 20
+  critico: 0
+
+indices_pauta:
+  relevancia_pauta:
+    pesos:
+      gravidade_problema: 0.6
+      abrangencia_territorial: 0.4
+
+  urgencia_pauta:
+    pesos:
+      urgencia: 1.0
+
+  demanda_territorial:
+    pesos:
+      abrangencia_territorial: 0.7
+      dados_comprovam_problema: 0.3
+
+  aderencia_ao_candidato:
+    pesos:
+      aderencia_candidato: 0.6
+      experiencia_anterior_candidato: 0.4
+
+  credibilidade_do_candidato:
+    pesos:
+      credibilidade_candidato: 0.7
+      experiencia_anterior_candidato: 0.3
+
+  # nota alta = pior (mesma convencao de risco_reputacional no Modulo Candidato)
+  saturacao_politica:
+    pesos:
+      saturacao_outros_candidatos: 1.0
+
+  espaco_programatico:
+    pesos:
+      diferenciacao: 0.5
+      baixa_saturacao: 0.5
+
+  diferenciacao_pauta:
+    pesos:
+      diferenciacao: 1.0
+
+  viabilidade_juridica:
+    pesos:
+      baixo_risco_juridico: 0.6
+      nao_exige_alteracao_legislativa: 0.4
+
+  viabilidade_fiscal:
+    pesos:
+      baixo_risco_fiscal: 0.5
+      existe_fonte_financiamento: 0.5
+
+  viabilidade_operacional:
+    pesos:
+      nao_depende_outro_ente: 0.5
+      existe_prazo_definido: 0.5
+
+  mensurabilidade:
+    pesos:
+      existe_indicador_resultado: 0.5
+      existe_meta_definida: 0.5
+
+  impacto_social:
+    pesos:
+      gravidade_problema: 0.6
+      abrangencia_territorial: 0.4
+
+  impacto_territorial:
+    pesos:
+      abrangencia_territorial: 1.0
+
+  # nota alta = pior
+  risco_de_rejeicao:
+    pesos:
+      risco_rejeicao: 0.6
+      saturacao_outros_candidatos: 0.4
+
+  # nota alta = pior (mais dependencia de terceiros = pior)
+  dependencia_federativa:
+    pesos:
+      depende_outro_ente: 0.7
+      exige_parceria: 0.3
+
+  potencial_de_comunicacao:
+    pesos:
+      potencial_comunicacao: 1.0
+
+  potencial_de_mobilizacao:
+    pesos:
+      potencial_mobilizacao: 1.0
+
+  coerencia_da_plataforma:
+    pesos:
+      coerencia_com_outras_pautas: 1.0
+
+  # indice-sintese (item 20 da secao 14.3) - DERIVADO, recombina os 19
+  # indices acima, sem pergunta nova. Penalizado pela saturacao politica,
+  # mesmo padrao do "prontidao_eleitoral" do Modulo Candidato.
+  indice_geral_prioridade:
+    pesos:
+      relevancia_pauta: 0.15
+      urgencia_pauta: 0.10
+      aderencia_ao_candidato: 0.10
+      credibilidade_do_candidato: 0.10
+      diferenciacao_pauta: 0.10
+      viabilidade_juridica: 0.10
+      viabilidade_fiscal: 0.10
+      viabilidade_operacional: 0.10
+      impacto_social: 0.10
+      potencial_de_comunicacao: 0.05
+    penalidade_saturacao_politica: 0.15  # multiplicador sobre saturacao_politica/100
+
+# Matriz de priorizacao de pautas (secao 14.4 do briefing). Mesmo motor de
+# regras do Modulo Candidato (config/weights.yaml:arquetipos - condicao
+# booleana avaliada com eval restrito sobre os indices ja calculados, ver
+# src/profiles/policy_classification.py). Ordem = prioridade normativa: a
+# primeira regra satisfeita e a classificacao "principal"; as demais
+# satisfeitas entram como "tambem aplicavel". Regras de risco vem primeiro
+# de proposito - uma pauta de alto risco nao deveria ser chamada de
+# "prioridade maxima" so por ter nota alta em outros eixos.
+matriz_priorizacao:
+  pauta_nao_recomendada:
+    condicao: "risco_de_rejeicao >= 70 or (viabilidade_juridica < 20 and viabilidade_fiscal < 20)"
+  pauta_de_alto_risco:
+    condicao: "risco_de_rejeicao >= 60 or dependencia_federativa >= 70"
+  pauta_saturada:
+    condicao: "saturacao_politica >= 70 and espaco_programatico < 30"
+  prioridade_maxima:
+    condicao: "indice_geral_prioridade >= 75 and aderencia_ao_candidato >= 60"
+  prioridade_estrategica:
+    condicao: "indice_geral_prioridade >= 60 and diferenciacao_pauta >= 60"
+  prioridade_territorial:
+    condicao: "demanda_territorial >= 70 and impacto_territorial >= 70"
+  pauta_que_exige_preparacao:
+    condicao: "(viabilidade_juridica < 40 or viabilidade_fiscal < 40 or viabilidade_operacional < 40) and indice_geral_prioridade >= 50"
+  pauta_de_longo_prazo:
+    condicao: "urgencia_pauta < 40 and relevancia_pauta >= 50"
+  pauta_complementar:
+    condicao: "indice_geral_prioridade >= 40 and indice_geral_prioridade < 60"
