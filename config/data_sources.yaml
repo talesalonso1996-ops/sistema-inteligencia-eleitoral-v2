@@ -252,6 +252,7 @@ pacote_cloud:
   arquivos:
     - "consulta_cand_2024_BR.parquet"
     - "consulta_cand_2022_BR.parquet"
+    - "consulta_cand_2018_BR.parquet"
     - "eleitorado_local_votacao_BR.parquet"
     - "detalhe_votacao_secao_2024_BR.parquet"
     - "demografia_setores_BR.parquet"
