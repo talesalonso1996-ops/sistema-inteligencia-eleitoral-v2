@@ -93,7 +93,7 @@ def gerar_relatorio_comparativo_html(dados: DadosRelatorio) -> str:
         corpo = ds.kpi_grid([
             (f"{cand_a.ano_eleicao} - {cand_a.cargo.title()}", _fmt(cand_a.total_votos),
              f"{cand_a.partido_sigla} - {cand_a.resultado_final}", ""),
-            (f"{cand_b.ano_eleicao} - {cand_b.cargo.title()}", _fmt(cand_b.total_votos),
+            (f"{cand_b.ano_eleicao} - {cand_b.cargo.title()}", _fmt(comp.votos_totais_comparavel),
              f"{cand_b.partido_sigla} - {cand_b.resultado_final}", ""),
             ("Zonas em comum", str(comp.n_zonas_comuns), "presentes nos dois anos", ""),
             ("Correlacao territorial", f"{comp.correlacao_territorial:.3f}" if comp.correlacao_territorial is not None else "n/d",

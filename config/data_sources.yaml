@@ -89,12 +89,15 @@ eleicoes:
     # (scripts/converter_munzona_2018.py -> votacao_candidato_munzona_2018_BR.parquet, 8.986.056
     # linhas, ja publicado na release dados-v2 e no pacote_cloud.arquivos abaixo - validado
     # contra resultado real conhecido, Governador SP 2018: Doria 6.431.555 votos no 1o turno).
-    # AINDA NAO HA integracao automatica desse arquivo nas funcoes `_generalizado`
-    # (candidate_finder.py so le votacao_secao) - o parquet esta disponivel em data/raw/ mas
-    # nenhuma funcao de analise (desempenho_territorial, candidate_history.py etc.) sabe lê-lo
-    # ainda. Adicionar suporte de 1a classe exigiria uma nova funcao de carregamento paralela a
-    # `votos_da_disputa_generalizado` para este formato mais grosso (sem NR_SECAO/NR_LOCAL_VOTACAO,
-    # so QT_VOTOS nominal por candidato x municipio x zona x turno).
+    # Integrado em src/candidate_history.py (votos_da_disputa_munzona_2018/
+    # votos_da_candidatura_munzona_2018 + _carregar_disputa) para o comparativo
+    # historico (Etapa 8, tipo 3) - candidate_finder.py `_generalizado` continua so
+    # lendo votacao_secao (2022/2024), sem mudanca; o fallback de 2018 e' so para
+    # a segunda candidatura (comparavel) do comparativo, nunca para a candidatura
+    # principal (a UI ainda nao expoe 2018 como eleicao primaria selecionavel).
+    # Validado com caso real: SANDERSON RIBEIRO CORREIA DE LIMA, Dep. Estadual/SP
+    # 2018 (suplente, AVANTE) -> Dep. Federal/SP 2022 (PRTB) - 29 zonas em comum,
+    # correlacao territorial real 0,956 (ver tests/test_relatorio_comparativo.py).
     votacao_secao_url: "https://cdn.tse.jus.br/estatistica/sead/odsele/votacao_secao/votacao_secao_2018_{uf}.zip"
     votacao_secao_arquivo: "votacao_secao_2018_{UF}.parquet"
     votacao_candidato_munzona_url_fallback: "https://data.brasil.io/mirror/eleicoes-brasil/votacao_candidato_munzona/votacao_candidato_munzona_2018.zip"
