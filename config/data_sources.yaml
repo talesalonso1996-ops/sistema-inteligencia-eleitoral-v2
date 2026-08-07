@@ -85,10 +85,16 @@ eleicoes:
     # documentado para 2020). A fonte real usada para 2018 e' votacao_candidato_munzona
     # (nivel zona+municipio, so votos NOMINAIS - sem legenda), baixada com sucesso via mirror
     # publico (data.brasil.io/mirror/eleicoes-brasil/votacao_candidato_munzona/votacao_candidato_munzona_2018.zip,
-    # 919MB, contem os 27 estados). NAO HA integracao automatica desse fallback nas funcoes
-    # `_generalizado` (que so leem votacao_secao) - uso real documentado em scripts ad-hoc,
-    # ver historico do projeto. Adicionar suporte de 1a classe exigiria uma nova funcao de
-    # carregamento paralela a `votos_da_disputa_generalizado` para este formato mais grosso.
+    # 919MB, contem os 27 estados) e convertida para parquet reduzido nacional
+    # (scripts/converter_munzona_2018.py -> votacao_candidato_munzona_2018_BR.parquet, 8.986.056
+    # linhas, ja publicado na release dados-v2 e no pacote_cloud.arquivos abaixo - validado
+    # contra resultado real conhecido, Governador SP 2018: Doria 6.431.555 votos no 1o turno).
+    # AINDA NAO HA integracao automatica desse arquivo nas funcoes `_generalizado`
+    # (candidate_finder.py so le votacao_secao) - o parquet esta disponivel em data/raw/ mas
+    # nenhuma funcao de analise (desempenho_territorial, candidate_history.py etc.) sabe lê-lo
+    # ainda. Adicionar suporte de 1a classe exigiria uma nova funcao de carregamento paralela a
+    # `votos_da_disputa_generalizado` para este formato mais grosso (sem NR_SECAO/NR_LOCAL_VOTACAO,
+    # so QT_VOTOS nominal por candidato x municipio x zona x turno).
     votacao_secao_url: "https://cdn.tse.jus.br/estatistica/sead/odsele/votacao_secao/votacao_secao_2018_{uf}.zip"
     votacao_secao_arquivo: "votacao_secao_2018_{UF}.parquet"
     votacao_candidato_munzona_url_fallback: "https://data.brasil.io/mirror/eleicoes-brasil/votacao_candidato_munzona/votacao_candidato_munzona_2018.zip"
@@ -253,6 +259,7 @@ pacote_cloud:
     - "consulta_cand_2024_BR.parquet"
     - "consulta_cand_2022_BR.parquet"
     - "consulta_cand_2018_BR.parquet"
+    - "votacao_candidato_munzona_2018_BR.parquet"
     - "eleitorado_local_votacao_BR.parquet"
     - "detalhe_votacao_secao_2024_BR.parquet"
     - "demografia_setores_BR.parquet"
