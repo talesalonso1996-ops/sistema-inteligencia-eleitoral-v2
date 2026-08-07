@@ -74,10 +74,42 @@ def _baixar(url: str) -> bytes:
     return resp.content
 
 
+_URL_FALLBACK_VOTACAO_SECAO_2018 = (
+    "https://github.com/talesalonso1996-ops/sistema-inteligencia-eleitoral-v2/"
+    "releases/download/dados-v2/votacao_secao_2018_{uf}.parquet"
+)
+
+
+def _garantir_votacao_secao_2018_fallback(uf: str, destino: Path) -> bool:
+    """O CDN oficial do TSE bloqueia (403/WAF) votacao_secao_2018 - baixa
+    direto o parquet ja processado (scripts/converter_votacao_secao_2018_bigquery.py,
+    fonte real: dataset publico br_tse_eleicoes do Base dos Dados/BigQuery,
+    validado contra resultado real conhecido - Governador SP 2018, Doria
+    6.431.555 votos). Mesmo schema de votacao_secao_2022/2024, com 2
+    limitacoes reais declaradas: so votos NOMINAIS (sem legenda/branco/
+    nulo) e sem NR_LOCAL_VOTACAO/NM_LOCAL_VOTACAO reais (preenchidos com um
+    sentinela que nunca bate com um codigo real, entao join geografico por
+    local de votacao nao encontra par para 2018 em vez de juntar errado)."""
+    logger.info("Baixando fallback de votacao_secao 2018 para UF %s (fonte: BigQuery/GitHub)", uf)
+    try:
+        conteudo = _baixar(_URL_FALLBACK_VOTACAO_SECAO_2018.format(uf=uf.upper()))
+    except Exception:
+        logger.exception("Falha ao baixar fallback de votacao_secao 2018 para UF %s", uf)
+        return False
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    tmp = destino.with_suffix(".tmp")
+    tmp.write_bytes(conteudo)
+    tmp.rename(destino)
+    return True
+
+
 def _garantir_votacao_secao_uf(uf: str, ano: int = 2024) -> bool:
     destino = caminho_votacao_secao(uf, ano)
     if destino.exists():
         return True
+
+    if ano == 2018:
+        return _garantir_votacao_secao_2018_fallback(uf, destino)
 
     url = _eleicao_cfg(ano)["votacao_secao_url"].format(uf=uf.upper())
     logger.info("Baixando votacao_secao %s da UF %s: %s", ano, uf, url)

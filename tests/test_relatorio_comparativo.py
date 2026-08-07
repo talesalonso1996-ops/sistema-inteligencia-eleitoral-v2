@@ -53,14 +53,15 @@ def test_comparativo_encontra_segunda_disputa_real_e_gera_secao_de_continuidade(
     assert "2022" in html and "2024" in html
 
 
-def test_comparativo_usa_fonte_alternativa_munzona_para_2018(ranking_sp):
+def test_comparativo_usa_fonte_alternativa_para_2018(ranking_sp):
     """Caso real conhecido: SANDERSON RIBEIRO CORREIA DE LIMA disputou
     Deputado Estadual/SP em 2018 (numero 70444, AVANTE, suplente) e
     Deputado Federal/SP em 2022 (numero 2814, PRTB, nao eleito) - mesmo
-    nome, mesma UF, sem homonimo. votacao_secao_2018 nao existe (o TSE
-    bloqueia o download oficial) - precisa achar o comparativo via
-    votacao_candidato_munzona_2018_BR.parquet (fonte alternativa, ja
-    convertida e publicada) e nao mais cair no caminho "sem territorio"."""
+    nome, mesma UF, sem homonimo. votacao_secao_2018 nao existe no CDN
+    oficial do TSE (bloqueado) - precisa achar o comparativo via
+    votacao_secao_2018_{UF}.parquet (fonte alternativa via BigQuery, ja
+    publicada e plugada em uf_data_bootstrap.py) e nao mais cair no caminho
+    "sem territorio"."""
     candidatos = buscar_candidatos_disputa(2022, "DEPUTADO FEDERAL", "SP", turno=1, numero=2814)
     candidatura = candidatos[0]
     vc = votos_da_candidatura_generalizado(candidatura)
@@ -73,6 +74,10 @@ def test_comparativo_usa_fonte_alternativa_munzona_para_2018(ranking_sp):
     assert resultado.n_zonas_comuns > 0
     assert resultado.correlacao_territorial is not None
     assert resultado.votos_totais_comparavel is not None and resultado.votos_totais_comparavel > 0
+    # agora que votacao_secao_2018 existe de verdade (fallback via BigQuery),
+    # ate o campo Candidatura.total_votos (preenchido pela checagem normal de
+    # votacao_secao) fica correto para 2018 - nao mais preso em 0.
+    assert resultado.candidatura_comparavel.total_votos > 0
 
     dados = DadosRelatorio(
         candidatura=candidatura, resultado_geral=resultado_geral(candidatura, vd, rd), ranking=ranking_sp,
@@ -82,11 +87,6 @@ def test_comparativo_usa_fonte_alternativa_munzona_para_2018(ranking_sp):
     html = gerar_relatorio_comparativo_html(dados)
     assert "Duas disputas reais" in html
     assert "2018" in html
-    # o total de votos de 2018 precisa vir do dado real ja carregado (via
-    # votos_totais_comparavel), nunca do campo Candidatura.total_votos (que
-    # fica 0 para 2018, ja que so e preenchido por uma checagem de
-    # votacao_secao que sempre falha para este ano).
-    assert resultado.candidatura_comparavel.total_votos == 0
     assert _fmt(resultado.votos_totais_comparavel) in html
 
 

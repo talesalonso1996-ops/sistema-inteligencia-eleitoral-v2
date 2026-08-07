@@ -15,17 +15,19 @@ mostrado (nunca adivinha entre homonimos). Toda saida desta funcao carrega
 esse aviso de forma explicita.
 
 Cobertura de dado real desta versao (2026): consulta_cand existe para
-2018/2022/2024. votacao_secao (nivel de secao) so existe localmente para
-2022 e 2024 - 2018 usa uma fonte alternativa mais grossa,
-votacao_candidato_munzona_2018_BR.parquet (mirror data.brasil.io, ja que o
-CDN oficial do TSE bloqueia o download de votacao_secao_2018 com 403; ver
-scripts/converter_munzona_2018.py e a nota em config/data_sources.yaml).
-Granularidade candidato x municipio x zona x turno (SEM secao/local de
-votacao, so voto NOMINAL - sem legenda) - suficiente para o comparativo por
-NR_ZONA feito aqui, mas com uma limitacao real declarada em
-`_LIMITACAO_MUNZONA_2018` sempre que usada. Quando nenhuma das duas fontes
-tem dado territorial para o ano comparavel, o match e reportado como
-registro real (cargo/partido/resultado) sem territorio, nunca fabricado."""
+2018/2022/2024, e votacao_secao TAMBEM existe para os 3 anos - 2018 usa uma
+fonte alternativa real (dataset publico br_tse_eleicoes do Base dos Dados/
+BigQuery, ja que o CDN oficial do TSE bloqueia o download de
+votacao_secao_2018 com 403), convertida para o MESMO schema de
+votacao_secao_2022/2024 (ver scripts/converter_votacao_secao_2018_bigquery.py
+e a nota em config/data_sources.yaml) e publicada como fallback automatico
+em src/uf_data_bootstrap.py - por isso 2018 flui pelas MESMAS funcoes
+`_generalizado` usadas para 2022, sem nenhum caminho de carregamento
+especial aqui. Unica limitacao real que sobrevive dessa fonte: so votos
+NOMINAIS (sem legenda/branco/nulo) - ver `_LIMITACAO_VOTOS_NOMINAIS_2018`.
+Quando nao ha dado territorial para o ano comparavel (falha de rede ao
+baixar o fallback, por exemplo), o match e reportado como registro real
+(cargo/partido/resultado) sem territorio, nunca fabricado."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -64,16 +66,16 @@ _LIMITACAO_ZONA_INSTAVEL = (
     "entre ciclos; a comparacao usa so as zonas presentes nos dois anos."
 )
 
-_LIMITACAO_MUNZONA_2018 = (
-    "O dado de 2018 vem de uma fonte alternativa (votacao_candidato_munzona, "
-    "mirror data.brasil.io) porque o TSE bloqueia o download oficial de "
-    "votacao por secao desse ano - granularidade candidato x municipio x "
-    "zona x turno, so voto NOMINAL (sem legenda). Os numeros de 2018 nesta "
-    "comparacao sao votos nominais reais, mas nao passaram pela mesma "
-    "filtragem de secao/local de votacao usada para 2022/2024."
+_LIMITACAO_VOTOS_NOMINAIS_2018 = (
+    "O dado de 2018 vem de uma fonte alternativa real (dataset publico "
+    "br_tse_eleicoes, Base dos Dados/BigQuery) porque o TSE bloqueia o "
+    "download oficial de votacao por secao desse ano - mesmo nivel de "
+    "secao/zona de 2022 e 2024, mas so com voto NOMINAL (sem legenda, "
+    "branco ou nulo): percentuais sobre votos validos podem ficar levemente "
+    "diferentes dos de 2022/2024 para cargos proporcionais."
 )
 
-_ANO_MUNZONA_FALLBACK = 2018
+_ANO_FONTE_ALTERNATIVA = 2018
 
 
 @dataclass
@@ -148,39 +150,11 @@ def buscar_candidatura_comparavel(candidatura: Candidatura, ano_alvo: int) -> Ca
     return candidatos[0] if candidatos else None
 
 
-def _fonte_votacao_munzona_2018() -> str:
-    return "data/raw/votacao_candidato_munzona_2018_BR.parquet"
-
-
-def votos_da_disputa_munzona_2018(candidatura: Candidatura) -> pd.DataFrame:
-    """Equivalente a votos_da_disputa_generalizado, lendo o parquet reduzido
-    de votacao_candidato_munzona (fallback de 2018 - ver nota do modulo).
-    Sem NR_SECAO/NR_LOCAL_VOTACAO: cada linha ja e' o voto nominal agregado
-    de 1 candidato numa combinacao municipio+zona+turno, nivel suficiente
-    para desempenho_territorial(nivel='NR_ZONA')."""
-    con = _conexao()
-    sql = f"""
-        SELECT NR_VOTAVEL, NM_VOTAVEL, DS_CARGO, CD_MUNICIPIO, NM_MUNICIPIO,
-               ANO_ELEICAO, NR_TURNO, NR_ZONA, QT_VOTOS
-        FROM {_scan_parquet(_fonte_votacao_munzona_2018())}
-        WHERE DS_CARGO ILIKE '{candidatura.cargo}'
-          AND SG_UF = '{candidatura.uf.upper()}'
-          AND NR_TURNO = {candidatura.turno}
-    """
-    return con.execute(sql).fetchdf()
-
-
-def votos_da_candidatura_munzona_2018(candidatura: Candidatura) -> pd.DataFrame:
-    votos = votos_da_disputa_munzona_2018(candidatura)
-    return votos[votos["NR_VOTAVEL"] == candidatura.numero].copy()
-
-
 def _carregar_disputa(candidatura: Candidatura) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    if candidatura.ano_eleicao == _ANO_MUNZONA_FALLBACK:
-        vc = votos_da_candidatura_munzona_2018(candidatura)
-        vd = votos_da_disputa_munzona_2018(candidatura)
-        rd = registro_candidatos_disputa_generalizado(candidatura)
-        return vc, vd, rd
+    """2018 nao precisa de nenhum caminho especial aqui: uf_data_bootstrap.py
+    ja resolve o fallback de votacao_secao_2018 (fonte alternativa via
+    BigQuery, mesmo schema) de forma transparente para as MESMAS funcoes
+    `_generalizado` usadas por 2022/2024."""
     if candidatura.codigo_municipio_tse is not None:
         vc = votos_da_candidatura(candidatura)
         vd = votos_da_disputa(candidatura)
@@ -237,8 +211,8 @@ def montar_comparativo_historico(
         )
         return ResultadoComparativoHistorico(candidatura, comparavel, limitacoes=limitacoes)
 
-    if ano_alvo == _ANO_MUNZONA_FALLBACK:
-        limitacoes.append(_LIMITACAO_MUNZONA_2018)
+    if ano_alvo == _ANO_FONTE_ALTERNATIVA:
+        limitacoes.append(_LIMITACAO_VOTOS_NOMINAIS_2018)
 
     terr_atual = desempenho_territorial(candidatura, vc_atual, vd_atual, rd_atual, "NR_ZONA")
     terr_comp = desempenho_territorial(comparavel, vc_comp, vd_comp, rd_comp, "NR_ZONA")
