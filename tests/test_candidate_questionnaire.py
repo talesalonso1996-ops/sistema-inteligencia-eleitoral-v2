@@ -70,6 +70,24 @@ def test_indisciplina_e_inverso_de_disciplina():
     assert campos["indisciplina"] == 25.0
 
 
+def test_padrinho_politico_nao_alimenta_campos_numericos():
+    """Mesmo tratamento de partido_sigla: fato declarado, nao autoavaliacao
+    categorica - nunca deve aparecer em campos_numericos() nem afetar
+    nenhum indice/taxa_preenchimento."""
+    identificacao = _identificacao_ficticia()
+    identificacao.possui_padrinho_politico = SimNao.SIM
+    identificacao.nome_padrinho_politico = "Fulano de Tal"
+    resposta = RespostaQuestionario(identificacao=identificacao)
+    assert "possui_padrinho_politico" not in resposta.campos_numericos()
+    assert "nome_padrinho_politico" not in resposta.campos_numericos()
+
+
+def test_padrinho_politico_default_none():
+    resposta = RespostaQuestionario(identificacao=_identificacao_ficticia())
+    assert resposta.identificacao.possui_padrinho_politico is None
+    assert resposta.identificacao.nome_padrinho_politico is None
+
+
 def test_taxa_preenchimento_parcial():
     resposta = RespostaQuestionario(
         identificacao=_identificacao_ficticia(),

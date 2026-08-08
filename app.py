@@ -350,6 +350,16 @@ def _pagina_questionario_candidato() -> None:
                 help="Usado para os rivais projetados e a compatibilidade partidaria abaixo - "
                      "so preenche se 'Partido definido?' for Sim.",
             )
+        c7, c8 = st.columns(2)
+        with c7:
+            possui_padrinho = _simnao("Possui padrinho politico?", "q_possui_padrinho")
+        with c8:
+            nome_padrinho = st.text_input(
+                "Nome do padrinho politico (se houver)", key="q_nome_padrinho",
+                help="So preenche se 'Possui padrinho politico?' for Sim. Usado na estrategia e "
+                     "nos relatorios deste candidato - vinculo de apadrinhamento e fonte real de "
+                     "apoio, mas tambem risco de associacao (desgaste do padrinho reflete no afilhado).",
+            )
 
         with st.expander("2. Trajetoria"):
             tempo_atuacao_publica = _nivel("Tempo de atuacao publica", "q_tempo_atuacao")
@@ -418,6 +428,8 @@ def _pagina_questionario_candidato() -> None:
             partido_definido=partido_definido,
             partido_sigla=partido_sigla.strip().upper() if partido_definido == SimNao.SIM and partido_sigla.strip() else None,
             ja_disputou_eleicao=ja_disputou if ja_disputou is not None else SimNao.NAO,
+            possui_padrinho_politico=possui_padrinho,
+            nome_padrinho_politico=nome_padrinho.strip() if possui_padrinho == SimNao.SIM and nome_padrinho.strip() else None,
         ),
         trajetoria=Trajetoria(
             tempo_atuacao_publica=tempo_atuacao_publica,
@@ -483,6 +495,13 @@ def _pagina_questionario_candidato() -> None:
         "Aviso metodologico: os indices abaixo sao autoavaliacao categorica declarada "
         "neste formulario - nao sao medicao objetiva de dado eleitoral."
     )
+    if resposta.identificacao.possui_padrinho_politico == SimNao.SIM:
+        st.info(
+            f"🤝 Padrinho politico declarado: **{resposta.identificacao.nome_padrinho_politico or '-- nome nao informado --'}**. "
+            "Leve em conta na estrategia e nos relatorios deste candidato: pode ser fonte real de apoio "
+            "(estrutura, base eleitoral emprestada, aval publico) mas tambem risco de associacao "
+            "(desgaste ou controversia do padrinho reflete no afilhado)."
+        )
 
     r_prontidao = indices["prontidao_eleitoral"]
     r_competitividade = indices["competitividade_inicial"]

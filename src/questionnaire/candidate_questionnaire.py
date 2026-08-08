@@ -89,6 +89,15 @@ class IdentificacaoAnalise:
     partido_sigla: str | None = None
     possui_domicilio_eleitoral: SimNao = SimNao.SIM
     ja_disputou_eleicao: SimNao = SimNao.NAO
+    # Mesmo tratamento de partido_definido/partido_sigla acima: fato
+    # declarado (nao autoavaliacao categorica, nao alimenta formula de
+    # indice - por isso fora de campos_numericos()), usado por quem monta
+    # a estrategia/relatorio do candidato para levar em conta o vinculo de
+    # apadrinhamento politico (fonte de apoio real, mas tambem risco de
+    # associacao caso o padrinho tenha desgaste publico) - nunca inferido,
+    # so aparece quando declarado explicitamente.
+    possui_padrinho_politico: SimNao | None = None
+    nome_padrinho_politico: str | None = None
 
 
 @dataclass
