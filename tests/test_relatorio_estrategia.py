@@ -11,7 +11,11 @@ from src.potential_analysis import identificar_bairros_potencial
 from src.potential_index import calcular_indice_performance
 from src.regression_models import regressao_logistica_bom_desempenho
 from src.report_generator import DadosRelatorio
-from src.reports.relatorio_estrategia import gerar_relatorio_estrategia_html, limitacoes_gerador
+from src.reports.relatorio_estrategia import (
+    gerar_relatorio_estrategia_html,
+    gerar_relatorio_estrategia_pdf,
+    limitacoes_gerador,
+)
 
 _NIVEL = "NR_ZONA"
 
@@ -104,3 +108,27 @@ def test_plano_de_acao_reflete_ranking_real_de_potencial(candidatura_sp, dados_d
     primeiro_territorio = str(dados.bairros_potencial.iloc[0][col_territorio])
     assert "Plano de acao priorizado" in html
     assert f"Prioridade 1 - {primeiro_territorio}" in html
+
+
+def test_pdf_estrategia_gera_arquivo_real_com_dados_completos(candidatura_sp, dados_disputa, ranking_sp, base_territorio_sp, tmp_path):
+    dados = _construir_dados_relatorio(candidatura_sp, dados_disputa, ranking_sp, base_territorio_sp)
+    caminho = gerar_relatorio_estrategia_pdf(dados, tmp_path / "estrategia_completo.pdf")
+    assert caminho.exists()
+    assert caminho.stat().st_size > 1000
+
+
+def test_pdf_estrategia_funciona_com_dados_minimos(candidatura_sp, dados_disputa, ranking_sp, tmp_path):
+    """Mesmo caso real do teste HTML equivalente - a versao PDF precisa
+    degradar graciosamente, nunca quebrar, com so os campos obrigatorios
+    de DadosRelatorio preenchidos."""
+    vc, vd, rd = dados_disputa
+    rg = resultado_geral(candidatura_sp, vd, rd)
+    terr = desempenho_territorial(candidatura_sp, vc, vd, rd, _NIVEL)
+    indice_terr = calcular_indice_performance(terr, 0.1)
+    dados_minimos = DadosRelatorio(
+        candidatura=candidatura_sp, resultado_geral=rg, ranking=ranking_sp,
+        territorial_indice=indice_terr, bairros_agg=None, correlacoes=None,
+    )
+    caminho = gerar_relatorio_estrategia_pdf(dados_minimos, tmp_path / "estrategia_minimo.pdf")
+    assert caminho.exists()
+    assert caminho.stat().st_size > 500

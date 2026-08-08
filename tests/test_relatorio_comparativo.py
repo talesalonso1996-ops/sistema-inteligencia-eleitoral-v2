@@ -12,7 +12,12 @@ from src.electoral_metrics import resultado_geral
 from src.potential_index import calcular_indice_performance
 from src.electoral_metrics import desempenho_territorial
 from src.report_generator import DadosRelatorio
-from src.reports.relatorio_comparativo import _fmt, gerar_relatorio_comparativo_html, limitacoes_gerador
+from src.reports.relatorio_comparativo import (
+    _fmt,
+    gerar_relatorio_comparativo_html,
+    gerar_relatorio_comparativo_pdf,
+    limitacoes_gerador,
+)
 
 _NIVEL = "NR_ZONA"
 
@@ -127,3 +132,52 @@ def test_gerar_relatorio_comparativo_funciona_sem_campo_preenchido(candidatura_s
     html = gerar_relatorio_comparativo_html(dados)
     assert candidatura_sp.nome_urna in html
     assert html.count('class="page') >= 3
+
+
+def test_pdf_comparativo_com_territorio_gera_arquivo_real(ranking_sp, tmp_path):
+    """Mesmo caso real do teste HTML (GARRY DERALUS, 2024 vs 2022, 54 zonas
+    em comum) - a versao PDF (ReportLab) precisa gerar um arquivo real e
+    nao vazio, cobrindo o ramo com comparativo territorial."""
+    candidatos = buscar_candidatos_disputa(2024, "VEREADOR", "SP", municipio_codigo=71072, turno=1, numero=13010)
+    candidatura = candidatos[0]
+    vc = votos_da_candidatura(candidatura)
+    vd = votos_da_disputa(candidatura)
+    rd = registro_candidatos_disputa(candidatura)
+
+    dados, comparativo = _dados_relatorio_com_comparativo(candidatura, vc, vd, rd, ranking_sp)
+    assert comparativo.candidatura_comparavel is not None
+
+    caminho = gerar_relatorio_comparativo_pdf(dados, tmp_path / "comparativo_com_territorio.pdf")
+    assert caminho.exists()
+    assert caminho.stat().st_size > 1000
+
+
+def test_pdf_comparativo_degrada_graciosamente_quando_nao_encontra_segunda_disputa(
+    candidatura_sp, dados_disputa, ranking_sp, tmp_path
+):
+    """Mesmo caso real do teste HTML (ALINE TORRES, sem segunda disputa) -
+    a versao PDF precisa gerar um arquivo real, mesmo no ramo sem
+    comparativo (nunca inventa trajetoria nem quebra)."""
+    vc, vd, rd = dados_disputa
+    dados, comparativo = _dados_relatorio_com_comparativo(candidatura_sp, vc, vd, rd, ranking_sp)
+    assert comparativo.candidatura_comparavel is None
+
+    caminho = gerar_relatorio_comparativo_pdf(dados, tmp_path / "comparativo_nao_encontrado.pdf")
+    assert caminho.exists()
+    assert caminho.stat().st_size > 500
+
+
+def test_pdf_comparativo_funciona_sem_campo_preenchido(candidatura_sp, dados_disputa, ranking_sp, tmp_path):
+    """comparativo_historico=None precisa degradar graciosamente na versao
+    PDF tambem, igual a versao HTML."""
+    vc, vd, rd = dados_disputa
+    rg = resultado_geral(candidatura_sp, vd, rd)
+    terr = desempenho_territorial(candidatura_sp, vc, vd, rd, _NIVEL)
+    indice_terr = calcular_indice_performance(terr, 0.1)
+    dados = DadosRelatorio(
+        candidatura=candidatura_sp, resultado_geral=rg, ranking=ranking_sp,
+        territorial_indice=indice_terr, bairros_agg=None, correlacoes=None,
+    )
+    caminho = gerar_relatorio_comparativo_pdf(dados, tmp_path / "comparativo_sem_campo.pdf")
+    assert caminho.exists()
+    assert caminho.stat().st_size > 500

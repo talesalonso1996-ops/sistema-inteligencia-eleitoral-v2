@@ -23,6 +23,13 @@ Reaproveita o MESMO `DadosRelatorio` (`src/report_generator.py`) que o tipo
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import cm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from . import design_system as ds
 from ..report_generator import DadosRelatorio
@@ -188,3 +195,115 @@ def gerar_relatorio_estrategia_html(dados: DadosRelatorio) -> str:
 
     html = ds.head(f"Relatorio de Estrategia SIET - {c.nome_urna}") + "\n".join(paginas)
     return html
+
+
+def gerar_relatorio_estrategia_pdf(dados: DadosRelatorio, caminho: str | Path) -> Path:
+    """Versao PDF resumida do relatorio de estrategia - mesmo padrao
+    (ReportLab, tema claro, tabelas + texto) ja usado por
+    report_generator.gerar_relatorio_pdf (Tipo 1). NAO tenta replicar o
+    design A4/CSS do HTML pixel a pixel - Playwright/Chromium (unica forma
+    pratica de fazer isso) nao e uma dependencia real do projeto
+    (requirements.txt) e nao roda de forma confiavel no Streamlit
+    Community Cloud gratuito; ReportLab ja e dependencia real e funciona
+    em qualquer ambiente de deploy."""
+    caminho = Path(caminho)
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    c = dados.candidatura
+
+    styles = getSampleStyleSheet()
+    titulo_style = ParagraphStyle("TituloCustom", parent=styles["Title"], textColor=colors.HexColor("#2a78d6"))
+    secao_style = ParagraphStyle("SecaoCustom", parent=styles["Heading2"], textColor=colors.HexColor("#0b0b0b"))
+
+    doc = SimpleDocTemplate(str(caminho), pagesize=A4, topMargin=1.5 * cm, bottomMargin=1.5 * cm)
+    elementos = [
+        Paragraph("Relatorio de Estrategia - Inteligencia Eleitoral", titulo_style),
+        Spacer(1, 10),
+        Paragraph(
+            f"<b>{c.nome_completo}</b> (\"{c.nome_urna}\") - {c.cargo} - {c.municipio}/{c.uf} - "
+            f"{c.partido_sigla} - Resultado: {c.resultado_final}",
+            styles["Normal"],
+        ),
+        Spacer(1, 6),
+        Paragraph(
+            "Versao automatica enxuta - cobre so o 100% calculavel a partir de dado ja oficial "
+            "(TSE/IBGE/RAIS-CAGED), sem narrativa manual por zona nem pesquisa de cena cultural/"
+            "microinfluenciadores por candidato.",
+            styles["Normal"],
+        ),
+        Spacer(1, 14),
+    ]
+
+    if dados.bairros_potencial is not None and not dados.bairros_potencial.empty:
+        pot = dados.bairros_potencial
+        col_territorio = pot.columns[0]
+        elementos += [Paragraph("Portfolio de territorios de investimento", secao_style)]
+        cols_tabela = [col_territorio, "score_potencial", "gap_vs_cluster"]
+        cols_tabela = [c for c in cols_tabela if c in pot.columns]
+        top = pot[cols_tabela].head(10)
+        linhas = [list(top.columns)] + top.astype(str).values.tolist()
+        tabela = Table(linhas, colWidths=[7 * cm, 4 * cm, 4 * cm])
+        tabela.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2a78d6")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e1e0d9")),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ]))
+        elementos += [tabela, Spacer(1, 10)]
+
+        elementos += [Paragraph("Plano de acao priorizado", secao_style)]
+        for i, row in pot.reset_index(drop=True).head(10).iterrows():
+            elementos += [Paragraph(
+                f"<b>Prioridade {i + 1} - {row[col_territorio]}:</b> {row['justificativa']} "
+                f"(score: {row['score_potencial']:.1f})",
+                styles["Normal"],
+            )]
+        elementos += [Spacer(1, 14)]
+
+    if dados.rivais_similaridade is not None and not dados.rivais_similaridade.empty:
+        elementos += [Paragraph("Rivais diretos (mesma base eleitoral)", secao_style)]
+        rs = dados.rivais_similaridade[["nome_urna", "partido_sigla", "correlacao_base_eleitoral", "total_votos_rival"]]
+        linhas_rs = [list(rs.columns)] + rs.astype(str).values.tolist()
+        tabela_rs = Table(linhas_rs, colWidths=[6 * cm, 3 * cm, 4 * cm, 3 * cm])
+        tabela_rs.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2a78d6")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e1e0d9")),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ]))
+        elementos += [tabela_rs, Spacer(1, 14)]
+
+    if dados.patrimonio_comparativo is not None and not dados.patrimonio_comparativo.empty:
+        elementos += [Paragraph("Patrimonio comparativo", secao_style)]
+        pc = dados.patrimonio_comparativo
+        linhas_pc = [list(pc.columns)] + pc.astype(str).values.tolist()
+        tabela_pc = Table(linhas_pc, colWidths=[16 * cm / len(pc.columns)] * len(pc.columns))
+        tabela_pc.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2a78d6")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e1e0d9")),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ]))
+        elementos += [tabela_pc, Spacer(1, 14)]
+
+    if dados.clusters_narrativa is not None and not dados.clusters_narrativa.empty:
+        elementos += [Paragraph("Segmentacao territorial", secao_style)]
+        for _, linha in dados.clusters_narrativa.iterrows():
+            elementos += [Paragraph(f"<b>{linha['rotulo_acao']}</b> - {linha['resumo']}", styles["Normal"])]
+        elementos += [Spacer(1, 14)]
+
+    if dados.maslow is not None and dados.maslow.fonte_efeito != "indisponivel":
+        elementos += [
+            Paragraph("Leitura de necessidades por territorio (Piramide de Maslow)", secao_style),
+            Paragraph(dados.maslow.disclaimer, styles["Normal"]),
+        ]
+        for frase in dados.maslow.narrativa:
+            elementos += [Paragraph(f"- {frase}", styles["Normal"])]
+        elementos += [Spacer(1, 14)]
+
+    limitacoes_todas = list(dados.limitacoes) + limitacoes_gerador()
+    elementos += [Paragraph("Limitacoes e fontes", secao_style)]
+    for aviso in limitacoes_todas:
+        elementos += [Paragraph(f"- {aviso}", styles["Normal"])]
+
+    doc.build(elementos)
+    return caminho

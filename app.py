@@ -98,8 +98,8 @@ from src.potential_analysis import identificar_bairros_potencial
 from src.projections.monte_carlo import cenario_agregado_votos, simular_regressao_linear
 from src.candidate_history import montar_comparativo_historico
 from src.reports.relatorio_completo import gerar_relatorio_completo_html
-from src.reports.relatorio_comparativo import gerar_relatorio_comparativo_html
-from src.reports.relatorio_estrategia import gerar_relatorio_estrategia_html
+from src.reports.relatorio_comparativo import gerar_relatorio_comparativo_html, gerar_relatorio_comparativo_pdf
+from src.reports.relatorio_estrategia import gerar_relatorio_estrategia_html, gerar_relatorio_estrategia_pdf
 from src.potential_index import calcular_indice_performance
 from src.regression_models import regressao_linear_votos, regressao_logistica_bom_desempenho
 from src.report_generator import DadosRelatorio, gerar_relatorio_html, gerar_relatorio_pdf
@@ -1139,7 +1139,8 @@ if _modo_app == "Matriz Integrada (Candidato x Territorio x Pauta)":
 
 st.sidebar.header("Selecione a disputa")
 
-_ANO_LABELS = {2024: "2024 - Eleicoes Municipais", 2022: "2022 - Eleicoes Gerais"}
+_ANO_LABELS = {2024: "2024 - Eleicoes Municipais", 2022: "2022 - Eleicoes Gerais", 2018: "2018 - Eleicoes Gerais"}
+_ANOS_SEM_MUNICIPIO = (2022, 2018)  # anos ESTADUAIS/DISTRITAIS - sem seletor de municipio
 ano = st.sidebar.selectbox("Eleicao", list(_ANO_LABELS), format_func=lambda a: _ANO_LABELS[a], key="v2_ano")
 
 _ufs_ordenadas = sorted(UF_NOME.items(), key=lambda kv: kv[1])
@@ -1162,7 +1163,7 @@ if uf and ano == 2024:
         municipio_nome = mun_label
 
 cargo = None
-_cargo_pronto = bool(uf) and (ano == 2022 or municipio_codigo is not None)
+_cargo_pronto = bool(uf) and (ano in _ANOS_SEM_MUNICIPIO or municipio_codigo is not None)
 if _cargo_pronto:
     cargos = cargos_disponiveis(ano, uf=uf)
     cargo_label = st.sidebar.selectbox("Cargo", ["-- selecione --"] + cargos, key="v2_cargo")
@@ -1226,8 +1227,10 @@ if alvo is None:
     st.title("Sistema de Inteligencia Eleitoral")
     st.caption(
         "Dados oficiais TSE (consulta de candidatos + votacao por secao) e IBGE "
-        "(Censo Demografico 2022). Eleicoes Municipais 2024 (Prefeito/Vereador, "
-        "Brasil inteiro) e piloto de Eleicoes Gerais 2022 (Governador, SP)."
+        "(Censo Demografico 2022), Brasil inteiro. Eleicoes Municipais 2024 "
+        "(Prefeito/Vereador). Eleicoes Gerais 2022 e 2018 (Governador, Senador, "
+        "Deputado Federal e Estadual) - 2018 usa fonte alternativa de votacao "
+        "por secao (o CDN oficial do TSE bloqueia esse ano), ver Limitacoes."
     )
     st.info(
         "Selecione Eleicao -> UF -> [Municipio] -> Cargo -> Candidato na barra "
@@ -1244,7 +1247,7 @@ st.sidebar.markdown(
     f"- Cargo: {alvo.cargo}\n"
     f"- Turno: {alvo.turno}\n"
     f"- Candidato: {alvo.nome_urna} ({alvo.numero}) - {alvo.partido_sigla}\n"
-    f"- Abrangencia: {'Municipal' if alvo.codigo_municipio_tse is not None else 'Estadual (piloto)'}"
+    f"- Abrangencia: {'Municipal' if alvo.codigo_municipio_tse is not None else 'Estadual'}"
 )
 
 candidatura_b_selecionada = None
@@ -1595,7 +1598,7 @@ elif secao == "Territorio":
         nivel = st.session_state["nivel_territorial"]
     else:
         st.caption(
-            "Cargo estadual (piloto): nivel territorial fixo em Municipio "
+            "Cargo estadual: nivel territorial fixo em Municipio "
             "(a UF inteira, nao zona/secao)."
         )
         nivel = "CD_MUNICIPIO"
@@ -2799,3 +2802,21 @@ elif secao == "Relatorio":
         xlsx_path = resolve_path(f"outputs/reports/dados_{candidatura.numero}_{candidatura.codigo_municipio_tse}.xlsx")
         exportar_excel(xlsx_path, planilhas)
         st.download_button("Baixar dados (Excel)", xlsx_path.read_bytes(), file_name=xlsx_path.name)
+
+    col7, col8 = st.columns(2)
+    with col7:
+        estrategia_pdf_path = resolve_path(
+            f"outputs/reports/relatorio_estrategia_{candidatura.numero}_{candidatura.codigo_municipio_tse}.pdf"
+        )
+        gerar_relatorio_estrategia_pdf(dados_relatorio, estrategia_pdf_path)
+        st.download_button(
+            "Baixar relatorio de estrategia (PDF)", estrategia_pdf_path.read_bytes(), file_name=estrategia_pdf_path.name,
+        )
+    with col8:
+        comparativo_pdf_path = resolve_path(
+            f"outputs/reports/relatorio_comparativo_{candidatura.numero}_{candidatura.codigo_municipio_tse}.pdf"
+        )
+        gerar_relatorio_comparativo_pdf(dados_relatorio, comparativo_pdf_path)
+        st.download_button(
+            "Baixar relatorio comparativo (PDF)", comparativo_pdf_path.read_bytes(), file_name=comparativo_pdf_path.name,
+        )

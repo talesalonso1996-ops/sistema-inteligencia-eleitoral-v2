@@ -24,6 +24,7 @@ import pandas as pd
 from ..candidate_finder import Candidatura
 from ..competitor_analysis import zonas_de_disputa
 from ..electoral_metrics import ResultadoGeral, desempenho_territorial, resultado_geral
+from ..rules.electoral_scope import EscopoInvalidoError, resolver_escopo
 from ..state_scope_indicators import (
     ConcentracaoTerritorial,
     PresencaEleitoral,
@@ -31,6 +32,7 @@ from ..state_scope_indicators import (
     calcular_presenca_eleitoral,
 )
 from ..utils import get_logger, indicators_config
+from ..vote_filtering import votos_nominais
 
 logger = get_logger(__name__)
 
@@ -161,13 +163,76 @@ def _calcular_iec(presenca: PresencaEleitoral, cfg: dict) -> ResultadoIndice:
     )
 
 
-def _calcular_qec(
-    territorial: pd.DataFrame, zonas: pd.DataFrame, presenca: PresencaEleitoral,
-    nivel: str, cfg: dict,
-) -> ResultadoIndice:
-    pesos = cfg["indice_qec"]["pesos"]
+def _e_cargo_proporcional(candidatura: Candidatura) -> bool:
+    """Consulta a unica fonte de verdade sobre sistema eleitoral do cargo
+    (src/rules/electoral_scope.py) - nunca um limiar arbitrario tipo
+    'numero de candidatos > X'. Cargo/ano/UF desconhecidos (ex.: cargo
+    ainda nao coberto por _CARGO_SCOPE_TABLE) degrada para a formula
+    MAJORITARIA original, nunca quebra o calculo do QEC."""
+    try:
+        escopo = resolver_escopo(
+            candidatura.ano_eleicao, candidatura.cargo,
+            uf=candidatura.uf, municipio=candidatura.municipio or None,
+        )
+        return escopo.sistema_eleitoral == "PROPORCIONAL"
+    except EscopoInvalidoError:
+        return False
 
-    dominados = zonas[zonas["situacao"].isin(["dominio", "dominio_absoluto"])]
+
+def _classificar_territorios_proporcional(
+    votos_disputa: pd.DataFrame, registro_disputa: pd.DataFrame, candidatura: Candidatura,
+    nivel: str, top_percentil: float,
+) -> pd.DataFrame:
+    """Classificacao alternativa de 'dominio' territorial para cargos
+    PROPORCIONAIS - ver nota metodologica em config/indicators.yaml:
+    indice_qec.variante_proporcional. Diferente de
+    competitor_analysis.zonas_de_disputa (que compara o candidato so
+    contra o concorrente mais forte do territorio), aqui 'dominio' e estar
+    entre os mais votados ABSOLUTOS daquele territorio (top decile por
+    padrao) e a margem e medida contra a MEDIANA dos concorrentes com voto
+    ali - reflete que uma disputa proporcional tem varias cadeiras, nao
+    uma so."""
+    nominais = votos_nominais(votos_disputa, registro_disputa)
+    por_territorio = nominais.groupby([nivel, "NR_VOTAVEL"], as_index=False)["QT_VOTOS"].sum()
+
+    linhas = []
+    for territorio, grupo in por_territorio.groupby(nivel):
+        votos_cand = grupo.loc[grupo["NR_VOTAVEL"] == candidatura.numero, "QT_VOTOS"]
+        if votos_cand.empty or votos_cand.iloc[0] == 0:
+            linhas.append({nivel: territorio, "situacao": "sem_votos_no_territorio", "margem_pct": -100.0})
+            continue
+        v_cand = float(votos_cand.iloc[0])
+        rivais = grupo.loc[grupo["NR_VOTAVEL"] != candidatura.numero, "QT_VOTOS"]
+        mediana_rivais = float(rivais.median()) if not rivais.empty else 0.0
+        margem = (v_cand - mediana_rivais) / max(v_cand, mediana_rivais, 1.0)
+        rank = int((grupo["QT_VOTOS"] > v_cand).sum()) + 1  # 1 = mais votado do territorio
+        percentil = 1 - (rank - 1) / len(grupo)
+        situacao = "dominio_proporcional" if percentil >= (1 - top_percentil) else "fora_do_dominio"
+        linhas.append({nivel: territorio, "situacao": situacao, "margem_pct": round(margem * 100, 2)})
+
+    return pd.DataFrame(linhas)
+
+
+def _calcular_qec(
+    candidatura: Candidatura, territorial: pd.DataFrame, zonas: pd.DataFrame,
+    votos_disputa: pd.DataFrame, registro_disputa: pd.DataFrame,
+    presenca: PresencaEleitoral, nivel: str, cfg: dict,
+) -> ResultadoIndice:
+    cfg_qec = cfg["indice_qec"]
+
+    if _e_cargo_proporcional(candidatura):
+        var = cfg_qec["variante_proporcional"]
+        pesos = var["pesos"]
+        chave_margem = "margem_media_sobre_mediana_nos_dominios"
+        classificacao = _classificar_territorios_proporcional(
+            votos_disputa, registro_disputa, candidatura, nivel, var["top_percentil"],
+        )
+        dominados = classificacao[classificacao["situacao"] == "dominio_proporcional"]
+    else:
+        pesos = cfg_qec["pesos"]
+        chave_margem = "margem_media_nos_dominios"
+        dominados = zonas[zonas["situacao"].isin(["dominio", "dominio_absoluto"])]
+
     margem_media = None
     alcance = None
     if not dominados.empty:
@@ -179,11 +244,11 @@ def _calcular_qec(
         if presenca.n_municipios_universo:
             alcance = 100 * len(dominados) / presenca.n_municipios_universo
 
-    componentes = {"margem_media_nos_dominios": margem_media, "alcance_do_dominio": alcance}
+    componentes = {chave_margem: margem_media, "alcance_do_dominio": alcance}
     valor, cob = _combinar(componentes, pesos)
     return ResultadoIndice(
-        "QEC", cfg["indice_qec"]["nome_completo"], valor, cob,
-        _classificar(valor, cfg["indice_qec"]["limites_classificacao"]),
+        "QEC", cfg_qec["nome_completo"], valor, cob,
+        _classificar(valor, cfg_qec["limites_classificacao"]),
     )
 
 
@@ -221,5 +286,5 @@ def calcular_indices_desempenho_real(
         idp=_calcular_idp(candidatura, rg, cfg),
         ive=_calcular_ive(candidatura, rg, concentracao, zonas, cfg),
         iec=_calcular_iec(presenca, cfg),
-        qec=_calcular_qec(territorial, zonas, presenca, nivel, cfg),
+        qec=_calcular_qec(candidatura, territorial, zonas, votos_disputa, registro_disputa, presenca, nivel, cfg),
     )

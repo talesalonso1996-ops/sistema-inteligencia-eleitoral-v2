@@ -319,6 +319,27 @@ indice_qec:
     margem_media_nos_dominios: 0.60       # margem media (ponderada por voto) nos territorios de "dominio"/"dominio_absoluto"
     alcance_do_dominio: 0.40              # territorios dominados / universo total de municipios da disputa
 
+  # Variante usada apenas para cargos PROPORCIONAIS (Vereador, Deputado
+  # Federal/Estadual/Distrital - ver src/rules/electoral_scope.py). Achado
+  # real ao testar a formula acima (pensada para disputas MAJORITARIAS) com
+  # dado de Vereador: "dominio" (vencer o concorrente mais forte NAQUELE
+  # territorio) e raro mesmo para o 1o colocado geral, porque uma disputa
+  # proporcional tem varias cadeiras e varios candidatos fortes disputando
+  # a mesma base - QEC ficava perto de zero (cobertura 0%, nao um valor
+  # baixo calculado de verdade). Redesenhado para nao exigir vencer o 1o
+  # rival: "dominio_proporcional" e estar entre os mais votados ABSOLUTOS
+  # daquele territorio (top decile por padrao), e a margem e medida contra
+  # a MEDIANA dos concorrentes com voto ali (o "concorrente tipico"), nao
+  # contra o mais forte. Continua sendo um proxy observavel de forca
+  # territorial - nunca uma simulacao de quociente eleitoral/cadeiras
+  # (exigiria modelar toda a disputa por coligacao, fora do escopo deste
+  # indice).
+  variante_proporcional:
+    top_percentil: 0.10                   # fracao mais votada de cada territorio considerada "dominio_proporcional"
+    pesos:
+      margem_media_sobre_mediana_nos_dominios: 0.60
+      alcance_do_dominio: 0.40
+
   limites_classificacao:
     muito_solida: 80
     solida: 60
@@ -334,12 +355,14 @@ indice_qec:
     pessoa, fora do escopo de um indice automatico (mesmo limite ja
     aplicado a biografia/midia em outras partes do sistema). O que este
     indice mede, de forma honesta e mais estreita, e a SOLIDEZ e o ALCANCE
-    das vitorias territoriais reais do candidato - um proxy observavel,
-    nao uma avaliacao da estrategia em si.
-    Achado real ao testar: em disputas PROPORCIONAIS concorridas (ex.:
-    Vereador, muitos candidatos fortes), "dominio" (margem >= 15% sobre o
-    maior rival NAQUELE territorio) e raro mesmo para o 1o colocado geral -
-    QEC pode ficar perto de zero (cobertura 0%, nao um valor baixo
-    calculado) nesses casos. Em disputas MAJORITARIAS (Prefeito,
-    Governador) o indice funciona como esperado. Isso e uma limitacao real
-    da metrica, nao um erro de calculo - documentada, nao escondida.
+    das vitorias/pontos-fortes territoriais reais do candidato - um proxy
+    observavel, nao uma avaliacao da estrategia em si.
+    Em cargos MAJORITARIOS (Prefeito, Governador, Senador, Presidente) usa
+    a formula principal acima ("dominio" = vencer o concorrente mais forte
+    do territorio, margem >= 15%). Em cargos PROPORCIONAIS (Vereador,
+    Deputado Federal/Estadual/Distrital) usa a `variante_proporcional`
+    acima, decidida via src/rules/electoral_scope.py (sistema_eleitoral) -
+    nunca por um limiar arbitrario de numero de candidatos. O top decile e
+    um proxy: nao garante que o territorio elegeria o candidato de fato
+    (isso depende do quociente partidario/coligacao inteiro, nao modelado
+    aqui) - documentado, nao escondido.

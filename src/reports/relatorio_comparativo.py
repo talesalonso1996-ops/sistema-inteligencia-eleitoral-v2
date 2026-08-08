@@ -17,6 +17,13 @@ embutidas em `ResultadoComparativoHistorico.limitacoes`."""
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
+
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import cm
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from . import design_system as ds
 from ..report_generator import DadosRelatorio
@@ -157,3 +164,113 @@ def gerar_relatorio_comparativo_html(dados: DadosRelatorio) -> str:
 
     html = ds.head(f"Relatorio Comparativo SIET - {c.nome_urna}") + "\n".join(paginas)
     return html
+
+
+def _tabela_reportlab(linhas: list[list[str]], col_widths: list[float]) -> Table:
+    tabela = Table(linhas, colWidths=col_widths)
+    tabela.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2a78d6")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e1e0d9")),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+    ]))
+    return tabela
+
+
+def gerar_relatorio_comparativo_pdf(dados: DadosRelatorio, caminho: str | Path) -> Path:
+    """Versao PDF resumida do relatorio comparativo - mesmo padrao ReportLab
+    (tema claro, tabelas + texto) ja usado por report_generator.gerar_relatorio_pdf
+    (Tipo 1) e relatorio_estrategia.gerar_relatorio_estrategia_pdf (Tipo 2).
+    Cobre as 3 situacoes reais que gerar_relatorio_comparativo_html cobre
+    (comparativo territorial encontrado / segunda candidatura sem territorio /
+    nenhuma segunda disputa encontrada) - nunca fabrica uma trajetoria quando
+    nao ha comparativo real."""
+    caminho = Path(caminho)
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    c = dados.candidatura
+    comp = dados.comparativo_historico
+
+    styles = getSampleStyleSheet()
+    titulo_style = ParagraphStyle("TituloCustom", parent=styles["Title"], textColor=colors.HexColor("#2a78d6"))
+    secao_style = ParagraphStyle("SecaoCustom", parent=styles["Heading2"], textColor=colors.HexColor("#0b0b0b"))
+
+    doc = SimpleDocTemplate(str(caminho), pagesize=A4, topMargin=1.5 * cm, bottomMargin=1.5 * cm)
+    elementos = [
+        Paragraph("Relatorio Comparativo/Historico - Inteligencia Eleitoral", titulo_style),
+        Spacer(1, 10),
+        Paragraph(
+            f"<b>{c.nome_completo}</b> (\"{c.nome_urna}\") - {c.cargo} - {c.municipio}/{c.uf} - "
+            f"{c.partido_sigla} - Eleicao {c.ano_eleicao}",
+            styles["Normal"],
+        ),
+        Spacer(1, 14),
+    ]
+
+    encontrado = comp is not None and comp.candidatura_comparavel is not None
+    com_territorio = encontrado and comp.comparativo_zonas is not None and not comp.comparativo_zonas.empty
+
+    if com_territorio:
+        cand_a, cand_b = comp.candidatura_atual, comp.candidatura_comparavel
+        elementos += [Paragraph("Duas disputas reais", secao_style)]
+        linhas = [
+            ["Disputa", "Votos", "Partido / Resultado"],
+            [f"{cand_a.ano_eleicao} - {cand_a.cargo.title()}", f"{cand_a.total_votos:,.0f}".replace(",", "."),
+             f"{cand_a.partido_sigla} - {cand_a.resultado_final}"],
+            [f"{cand_b.ano_eleicao} - {cand_b.cargo.title()}", _fmt(comp.votos_totais_comparavel),
+             f"{cand_b.partido_sigla} - {cand_b.resultado_final}"],
+        ]
+        elementos += [_tabela_reportlab(linhas, [7 * cm, 4 * cm, 5 * cm]), Spacer(1, 8)]
+        corr_txt = f"{comp.correlacao_territorial:.3f}" if comp.correlacao_territorial is not None else "n/d"
+        elementos += [Paragraph(
+            f"Zonas em comum: <b>{comp.n_zonas_comuns}</b>. Correlacao territorial: "
+            f"<b>{corr_txt}</b> (Pearson, voto por zona).",
+            styles["Normal"],
+        )]
+        elementos += [Paragraph(
+            "Correlacao territorial mede se as mesmas zonas eleitorais foram fortes/fracas nas duas "
+            "disputas (continuidade de base) - nao mede crescimento nem serve como projecao para uma "
+            "eleicao futura.",
+            styles["Normal"],
+        ), Spacer(1, 14)]
+
+        elementos += [Paragraph("Zona a zona (ate 30 zonas)", secao_style)]
+        zonas = comp.comparativo_zonas.head(30)
+        linhas_z = [list(zonas.columns)] + zonas.astype(str).values.tolist()
+        n_cols = len(zonas.columns)
+        elementos += [_tabela_reportlab(linhas_z, [16 * cm / n_cols] * n_cols), Spacer(1, 14)]
+
+    elif encontrado:
+        cb = comp.candidatura_comparavel
+        elementos += [Paragraph("Segunda candidatura encontrada, sem dado territorial", secao_style)]
+        linhas = [
+            ["Ano", "Cargo", "Partido", "Resultado"],
+            [str(cb.ano_eleicao), cb.cargo, f"{cb.partido_sigla} - {cb.partido_nome}", cb.resultado_final],
+        ]
+        elementos += [_tabela_reportlab(linhas, [3 * cm, 5 * cm, 5 * cm, 5 * cm]), Spacer(1, 8)]
+        elementos += [Paragraph(
+            "Candidatura real encontrada no registro do TSE (consulta_cand), mas sem votacao por "
+            "secao carregada localmente neste projeto para esse ano - nao e possivel montar "
+            "comparativo territorial. Nenhum numero de voto por zona e mostrado ou estimado.",
+            styles["Normal"],
+        ), Spacer(1, 14)]
+
+    else:
+        elementos += [Paragraph("Nenhuma segunda disputa comparavel encontrada", secao_style)]
+        elementos += [Paragraph(
+            "Nenhuma segunda disputa real foi encontrada para esta pessoa nos anos com dado carregado "
+            "neste projeto. Isso pode significar que a pessoa disputou so esta eleicao, que disputou "
+            "em outro ano/UF fora do escopo deste projeto, ou que o nome declarado nao bateu de forma "
+            "inequivoca (o casamento e conservador de proposito - nunca escolhe entre homonimos). "
+            "Nenhuma trajetoria e inferida ou estimada.",
+            styles["Normal"],
+        ), Spacer(1, 14)]
+
+    limitacoes_todas = list(dados.limitacoes) + limitacoes_gerador()
+    if comp is not None:
+        limitacoes_todas = limitacoes_todas + list(comp.limitacoes)
+    elementos += [Paragraph("Limitacoes e fontes", secao_style)]
+    for aviso in limitacoes_todas:
+        elementos += [Paragraph(f"- {aviso}", styles["Normal"])]
+
+    doc.build(elementos)
+    return caminho
