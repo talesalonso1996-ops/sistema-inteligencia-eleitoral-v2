@@ -339,8 +339,12 @@ def grafico_perfil_economico_municipio(perfil) -> go.Figure:
         marker_color=[COR_CANDIDATO, "#5b6270"],
         text=[perfil.admissoes_2024, perfil.desligamentos_2024], textposition="outside",
     ))
+    # saldo_caged_2024 pode ser None mesmo com o perfil disponivel=True
+    # (municipio com RAIS mas sem linha no CAGED 2024) - bug real corrigido:
+    # o format-spec ":+," em None levantava TypeError e quebrava o grafico.
+    saldo_texto = f"{perfil.saldo_caged_2024:+,}".replace(",", ".") if perfil.saldo_caged_2024 is not None else "n/d"
     fig.add_annotation(
-        text=f"Saldo: {perfil.saldo_caged_2024:+,}".replace(",", ".") + f" ({perfil.tendencia})",
+        text=f"Saldo: {saldo_texto} ({perfil.tendencia})",
         x=0.5, y=1.12, xref="paper", yref="paper", showarrow=False,
         font=dict(color=cor, size=14),
     )

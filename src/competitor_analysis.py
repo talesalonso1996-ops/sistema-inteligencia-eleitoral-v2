@@ -83,7 +83,17 @@ def ranking_partidos(
         n_eleitos=("eleito", "sum"),
     )
     legenda = votos_legenda_por_partido(votos_disputa, registro_disputa)
-    legenda_agg = legenda.groupby(["partido_sigla", "partido_nome"], as_index=False)["votos_legenda"].sum()
+    if legenda.empty:
+        # Cargos MAJORITARIOS (Prefeito, Governador, Senador, Presidente)
+        # nao tem voto de legenda de verdade - nao ha coligacao com
+        # cadeiras proporcionais para justificar votar so no partido. Zero
+        # legenda aqui e um resultado real, nao um erro: sem isso, o
+        # groupby seguinte quebra porque o DataFrame vazio de
+        # votos_legenda_por_partido so tem as colunas ["numero_partido",
+        # "votos_legenda"], sem partido_sigla/partido_nome.
+        legenda_agg = pd.DataFrame(columns=["partido_sigla", "partido_nome", "votos_legenda"])
+    else:
+        legenda_agg = legenda.groupby(["partido_sigla", "partido_nome"], as_index=False)["votos_legenda"].sum()
 
     agregado = nominal_partido.merge(legenda_agg, on=["partido_sigla", "partido_nome"], how="outer")
     agregado[["votos_nominais", "votos_legenda", "n_candidatos", "n_eleitos"]] = agregado[

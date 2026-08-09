@@ -262,12 +262,31 @@ def variaveis_domicilio(setores_de_interesse: set[str]) -> pd.DataFrame:
     return resultado
 
 
+# Mesmo conjunto de colunas que o merge abaixo produz no caminho normal -
+# usado so no atalho vazio (ver perfil_demografico_por_setor). Manter em
+# sincronia se alguma das 6 funcoes de variaveis_* ganhar/perder coluna.
+# Bug real corrigido: o atalho antigo retornava so ["CD_SETOR"] quando
+# nenhum setor era encontrado (ex.: UF com geocodificacao 0% para uma
+# eleicao real) - agregados_populacionais_municipio (e qualquer outro
+# consumidor) quebrava com KeyError ao tentar ler "populacao_total" nesse
+# DataFrame truncado.
+_COLUNAS_PERFIL_DEMOGRAFICO_SETOR = [
+    "CD_SETOR", "populacao_total", "pct_masculino", "pct_feminino", "idade_media_aprox",
+    "pct_populacao_15_24", "pct_populacao_60mais",
+    "pct_branca", "pct_preta", "pct_amarela", "pct_parda", "pct_indigena", "pct_preta_parda",
+    "pct_alfabetizado_15mais",
+    "n_responsaveis_com_rendimento", "n_moradores", "renda_media_responsavel",
+    "pct_domicilios_chefia_feminina",
+    "pct_agua_encanada", "pct_esgoto_adequado", "pct_coleta_lixo", "pct_sem_banheiro", "pct_esgoto_a_ceu_aberto",
+]
+
+
 def perfil_demografico_por_setor(setores_de_interesse: set[str]) -> pd.DataFrame:
     """Junta todas as variaveis demograficas verificadas em uma unica
     tabela por setor censitario."""
     setores_de_interesse = {s for s in setores_de_interesse if s and s != "None"}
     if not setores_de_interesse:
-        return pd.DataFrame(columns=["CD_SETOR"])
+        return pd.DataFrame(columns=_COLUNAS_PERFIL_DEMOGRAFICO_SETOR)
 
     demografia = variaveis_demografia(setores_de_interesse)
     cor_raca = variaveis_cor_raca(setores_de_interesse)

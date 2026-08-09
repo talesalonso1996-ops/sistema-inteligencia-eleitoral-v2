@@ -15,6 +15,7 @@ grandes demais) e precisa ser reconstituido a cada novo container.
 """
 from __future__ import annotations
 
+import duckdb
 import requests
 import streamlit as st
 
@@ -42,6 +43,17 @@ def _baixar(nome_arquivo: str, url_base: str) -> None:
     with open(tmp, "wb") as f:
         for chunk in resp.iter_content(chunk_size=1024 * 1024):
             f.write(chunk)
+    # Bug real corrigido (mesma classe do fix em uf_data_bootstrap.py): sem
+    # validar o conteudo baixado, uma resposta HTTP 200 com corpo invalido
+    # gravava um arquivo corrompido em `destino` - a checagem seguinte so
+    # olha `destino.exists()`, entao a corrupcao ficava permanente. Ler o
+    # parquet antes do rename garante que so um arquivo estruturalmente
+    # valido fica cacheado.
+    try:
+        duckdb.sql(f"SELECT COUNT(*) FROM read_parquet('{tmp.as_posix()}')")
+    except Exception as exc:
+        tmp.unlink(missing_ok=True)
+        raise ValueError(f"Download de {nome_arquivo} nao e um parquet valido") from exc
     tmp.rename(destino)
 
 

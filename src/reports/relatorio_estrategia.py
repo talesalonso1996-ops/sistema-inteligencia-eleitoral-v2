@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from xml.sax.saxutils import escape as _esc
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -218,9 +219,12 @@ def gerar_relatorio_estrategia_pdf(dados: DadosRelatorio, caminho: str | Path) -
     elementos = [
         Paragraph("Relatorio de Estrategia - Inteligencia Eleitoral", titulo_style),
         Spacer(1, 10),
+        # ReportLab Paragraph interpreta mini-XML, nao escapa sozinho (ver
+        # nota identica em report_generator.py) - _esc() evita que um "&"
+        # real (ex.: coligacao/partido) quebre a geracao do PDF.
         Paragraph(
-            f"<b>{c.nome_completo}</b> (\"{c.nome_urna}\") - {c.cargo} - {c.municipio}/{c.uf} - "
-            f"{c.partido_sigla} - Resultado: {c.resultado_final}",
+            f"<b>{_esc(c.nome_completo)}</b> (\"{_esc(c.nome_urna)}\") - {_esc(c.cargo)} - "
+            f"{_esc(c.municipio)}/{_esc(c.uf)} - {_esc(c.partido_sigla)} - Resultado: {_esc(c.resultado_final)}",
             styles["Normal"],
         ),
         Spacer(1, 6),
@@ -253,7 +257,7 @@ def gerar_relatorio_estrategia_pdf(dados: DadosRelatorio, caminho: str | Path) -
         elementos += [Paragraph("Plano de acao priorizado", secao_style)]
         for i, row in pot.reset_index(drop=True).head(10).iterrows():
             elementos += [Paragraph(
-                f"<b>Prioridade {i + 1} - {row[col_territorio]}:</b> {row['justificativa']} "
+                f"<b>Prioridade {i + 1} - {_esc(str(row[col_territorio]))}:</b> {_esc(str(row['justificativa']))} "
                 f"(score: {row['score_potencial']:.1f})",
                 styles["Normal"],
             )]
@@ -288,7 +292,7 @@ def gerar_relatorio_estrategia_pdf(dados: DadosRelatorio, caminho: str | Path) -
     if dados.clusters_narrativa is not None and not dados.clusters_narrativa.empty:
         elementos += [Paragraph("Segmentacao territorial", secao_style)]
         for _, linha in dados.clusters_narrativa.iterrows():
-            elementos += [Paragraph(f"<b>{linha['rotulo_acao']}</b> - {linha['resumo']}", styles["Normal"])]
+            elementos += [Paragraph(f"<b>{_esc(str(linha['rotulo_acao']))}</b> - {_esc(str(linha['resumo']))}", styles["Normal"])]
         elementos += [Spacer(1, 14)]
 
     if dados.maslow is not None and dados.maslow.fonte_efeito != "indisponivel":

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from xml.sax.saxutils import escape as _esc
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -198,9 +199,12 @@ def gerar_relatorio_comparativo_pdf(dados: DadosRelatorio, caminho: str | Path) 
     elementos = [
         Paragraph("Relatorio Comparativo/Historico - Inteligencia Eleitoral", titulo_style),
         Spacer(1, 10),
+        # ReportLab Paragraph interpreta mini-XML, nao escapa sozinho (ver
+        # nota identica em report_generator.py) - _esc() evita que um "&"
+        # real (ex.: coligacao/partido) quebre a geracao do PDF.
         Paragraph(
-            f"<b>{c.nome_completo}</b> (\"{c.nome_urna}\") - {c.cargo} - {c.municipio}/{c.uf} - "
-            f"{c.partido_sigla} - Eleicao {c.ano_eleicao}",
+            f"<b>{_esc(c.nome_completo)}</b> (\"{_esc(c.nome_urna)}\") - {_esc(c.cargo)} - "
+            f"{_esc(c.municipio)}/{_esc(c.uf)} - {_esc(c.partido_sigla)} - Eleicao {c.ano_eleicao}",
             styles["Normal"],
         ),
         Spacer(1, 14),

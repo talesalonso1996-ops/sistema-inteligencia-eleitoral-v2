@@ -1,9 +1,16 @@
 import pandas as pd
 
+from src.candidate_finder import (
+    buscar_candidatos_disputa,
+    registro_candidatos_disputa_generalizado,
+    votos_da_disputa_generalizado,
+)
 from src.competitor_analysis import (
     delta_vs_rivais,
     matriz_candidato_territorio,
     perfil_comparativo_dois_candidatos,
+    ranking_disputa,
+    ranking_partidos,
     rivais_por_similaridade_eleitorado,
 )
 from src.vote_filtering import votos_nominais, votos_validos
@@ -37,6 +44,27 @@ def test_rivais_por_similaridade_respeita_top_n(candidatura_sp, dados_disputa):
     _, vd, rd = dados_disputa
     rivais, _ = rivais_por_similaridade_eleitorado(candidatura_sp, vd, rd, "NR_ZONA", top_n=3)
     assert len(rivais) <= 3
+
+
+def test_ranking_partidos_nao_quebra_em_disputa_majoritaria_sem_legenda():
+    """Bug real encontrado ao liberar o relatorio rico para candidaturas
+    estaduais: cargos MAJORITARIOS (Governador, Prefeito, Senador,
+    Presidente) nao tem voto de legenda de verdade (sem coligacao com
+    cadeiras proporcionais, ninguem vota so no partido) - quando a disputa
+    inteira tem ZERO voto de legenda, votos_legenda_por_partido() retorna
+    um DataFrame vazio SO com as colunas ["numero_partido",
+    "votos_legenda"], sem partido_sigla/partido_nome, e o groupby seguinte
+    quebrava com KeyError. Caso real: Governador/SP 2022 (Tarcisio,
+    numero 10, 1o turno)."""
+    tarcisio = buscar_candidatos_disputa(2022, "GOVERNADOR", "SP", turno=1, numero=10)[0]
+    vd = votos_da_disputa_generalizado(tarcisio)
+    rd = registro_candidatos_disputa_generalizado(tarcisio)
+    ranking = ranking_disputa(vd, rd)
+
+    resultado = ranking_partidos(ranking, vd, rd)
+    assert not resultado.empty
+    assert "REPUBLICANOS" in resultado["partido_sigla"].values
+    assert (resultado["votos_legenda"] == 0).all()
 
 
 def test_delta_vs_rivais_bate_com_calculo_manual():

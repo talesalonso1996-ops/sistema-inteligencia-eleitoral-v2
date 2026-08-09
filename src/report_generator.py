@@ -10,6 +10,7 @@ import io
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from xml.sax.saxutils import escape as _esc
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -84,11 +85,18 @@ def gerar_relatorio_html(dados: DadosRelatorio) -> str:
         if dados.limitacoes else "<p>Nenhuma limitacao registrada nesta execucao.</p>"
     )
 
+    # Cargos ESTADUAIS/DISTRITAIS (codigo_municipio_tse None) nao tem bairro
+    # - a mesma tabela agrega por MUNICIPIO da UF inteira (ver app.py, secao
+    # "Relatorio") - titulo/fallback ajustados de acordo, nunca rotulando
+    # dado de municipio como se fosse bairro.
+    _eh_municipal_rel = dados.candidatura.codigo_municipio_tse is not None
+    titulo_bairros = "Bairros/distritos com mais votos" if _eh_municipal_rel else "Municipios com mais votos"
     tabela_ranking = dados.ranking.head(15).to_html(index=False, classes="tabela", border=0)
     tabela_territorial = dados.territorial_indice.head(20).to_html(index=False, classes="tabela", border=0)
     tabela_bairros = (
         dados.bairros_agg.head(15).to_html(index=False, classes="tabela", border=0)
-        if dados.bairros_agg is not None else "<p>Analise de bairro indisponivel.</p>"
+        if dados.bairros_agg is not None
+        else ("<p>Analise de bairro indisponivel.</p>" if _eh_municipal_rel else "<p>Analise por municipio indisponivel.</p>")
     )
 
     secao_rivais = ""
@@ -171,7 +179,11 @@ def gerar_relatorio_html(dados: DadosRelatorio) -> str:
     secao_economico = ""
     if dados.perfil_economico is not None and dados.perfil_economico.disponivel:
         pe = dados.perfil_economico
-        saldo_fmt = f"{pe.saldo_caged_2024:+,}".replace(",", ".")
+        # saldo_caged_2024 pode ser None mesmo com disponivel=True (municipio
+        # tem RAIS mas nao tem linha no CAGED 2024, ou vice-versa) - bug real
+        # corrigido: o format-spec ":+," em None levantava TypeError e
+        # quebrava a geracao do relatorio inteiro para esse candidato.
+        saldo_fmt = f"{pe.saldo_caged_2024:+,}".replace(",", ".") if pe.saldo_caged_2024 is not None else "n/d"
         secao_economico = f"""
   <h2>Contexto economico do municipio (RAIS + CAGED)</h2>
   <p><i>{pe.limitacoes}</i></p>
@@ -224,7 +236,7 @@ def gerar_relatorio_html(dados: DadosRelatorio) -> str:
   {tabela_territorial}
   {secao_delta}
 
-  <h2>Bairros/distritos com mais votos</h2>
+  <h2>{titulo_bairros}</h2>
   {tabela_bairros}
   {secao_correlacoes}
   {secao_logistica}
@@ -274,9 +286,14 @@ def gerar_relatorio_pdf(dados: DadosRelatorio, caminho: str | Path) -> Path:
     elementos = [
         Paragraph("Relatorio Executivo - Inteligencia Eleitoral", titulo_style),
         Spacer(1, 10),
+        # ReportLab Paragraph interpreta um mini-XML (nao faz escaping
+        # automatico como pandas.to_html) - campos vindos do TSE (ex.:
+        # coligacao/partido com "&" no nome) podem quebrar o parser e
+        # abortar a geracao do PDF inteiro; _esc() evita isso sem mudar o
+        # texto exibido (so escapa "&"/"<"/">").
         Paragraph(
-            f"<b>{c.nome_completo}</b> (\"{c.nome_urna}\") - {c.cargo} - {c.municipio}/{c.uf} - "
-            f"{c.partido_sigla} - Resultado: {c.resultado_final}",
+            f"<b>{_esc(c.nome_completo)}</b> (\"{_esc(c.nome_urna)}\") - {_esc(c.cargo)} - "
+            f"{_esc(c.municipio)}/{_esc(c.uf)} - {_esc(c.partido_sigla)} - Resultado: {_esc(c.resultado_final)}",
             styles["Normal"],
         ),
         Spacer(1, 14),
@@ -348,7 +365,7 @@ def gerar_relatorio_pdf(dados: DadosRelatorio, caminho: str | Path) -> Path:
     if dados.clusters_narrativa is not None and not dados.clusters_narrativa.empty:
         elementos += [Paragraph("Segmentacao de territorios (clusters)", secao_style)]
         for _, linha in dados.clusters_narrativa.iterrows():
-            elementos += [Paragraph(f"<b>{linha['rotulo_acao']}</b> - {linha['resumo']}", styles["Normal"])]
+            elementos += [Paragraph(f"<b>{_esc(str(linha['rotulo_acao']))}</b> - {_esc(str(linha['resumo']))}", styles["Normal"])]
         elementos += [Spacer(1, 12)]
 
     if dados.maslow is not None and dados.maslow.fonte_efeito != "indisponivel":
@@ -365,7 +382,11 @@ def gerar_relatorio_pdf(dados: DadosRelatorio, caminho: str | Path) -> Path:
 
     if dados.perfil_economico is not None and dados.perfil_economico.disponivel:
         pe = dados.perfil_economico
-        saldo_fmt = f"{pe.saldo_caged_2024:+,}".replace(",", ".")
+        # saldo_caged_2024 pode ser None mesmo com disponivel=True (municipio
+        # tem RAIS mas nao tem linha no CAGED 2024, ou vice-versa) - bug real
+        # corrigido: o format-spec ":+," em None levantava TypeError e
+        # quebrava a geracao do relatorio inteiro para esse candidato.
+        saldo_fmt = f"{pe.saldo_caged_2024:+,}".replace(",", ".") if pe.saldo_caged_2024 is not None else "n/d"
         elementos += [
             Paragraph("Contexto economico do municipio (RAIS + CAGED)", secao_style),
             Paragraph(pe.limitacoes, styles["Normal"]),

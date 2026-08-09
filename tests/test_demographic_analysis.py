@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from src.demographic_analysis import agregados_populacionais_municipio
+from src.demographic_analysis import agregados_populacionais_municipio, perfil_demografico_por_setor
 
 _COLUNAS_PERCENTUAIS_NOVAS = [
     "pct_domicilios_chefia_feminina", "pct_agua_encanada", "pct_esgoto_adequado", "pct_coleta_lixo",
@@ -38,6 +38,33 @@ def test_faixas_etarias_isoladas_coerentes_com_idade_media(base_territorio_sp):
     df = base_territorio_sp.dropna(subset=["pct_populacao_15_24", "pct_populacao_60mais"])
     assert not df.empty
     assert (df["pct_populacao_15_24"] + df["pct_populacao_60mais"] <= 100.01).all()
+
+
+def test_perfil_demografico_por_setor_vazio_tem_populacao_total_na_coluna():
+    """Bug real corrigido: quando nenhum setor censitario e encontrado
+    (ex.: UF com 0% de geocodificacao para uma eleicao real), o atalho
+    vazio tinha so a coluna CD_SETOR - qualquer consumidor que lesse
+    'populacao_total' (ex.: agregados_populacionais_municipio) quebrava
+    com KeyError. Confirma que o atalho vazio ja vem com todas as colunas
+    que o caminho normal produziria."""
+    vazio = perfil_demografico_por_setor(set())
+    assert vazio.empty
+    assert "populacao_total" in vazio.columns
+    assert "pct_agua_encanada" in vazio.columns
+
+
+def test_agregados_populacionais_municipio_nao_quebra_com_perfil_vazio():
+    """Mesmo bug, verificado end-to-end: agregados_populacionais_municipio
+    precisa degradar graciosamente (populacao_total_municipio = 0/NaN),
+    nunca lancar KeyError, quando perfil_por_setor vem do atalho vazio."""
+    pontos_com_setor = pd.DataFrame({
+        "local_votacao_id": ["Local A"],
+        "CD_SETOR": ["SETOR_1"],
+        "CD_MUNICIPIO": [1001],
+    })
+    perfil_vazio = perfil_demografico_por_setor(set())
+    resultado = agregados_populacionais_municipio(pontos_com_setor, perfil_vazio)
+    assert list(resultado["CD_MUNICIPIO"]) == [1001]
 
 
 def test_agregados_populacionais_municipio_dedup_por_local_antes_de_somar():

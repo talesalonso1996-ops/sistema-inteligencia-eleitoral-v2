@@ -41,6 +41,26 @@ _IBGE_MALHA_URL = (
 _COLUNAS_SETORES = ["CD_SETOR", "CD_MUN", "NM_MUN", "NM_DIST", "CD_BAIRRO", "geometry"]
 _COLUNAS_BAIRROS = ["CD_MUN", "NM_MUN", "NM_BAIRRO", "geometry"]
 
+# As 27 UFs reais do Brasil - unica fonte de verdade e geographic_analysis.py
+# (_UFS_BRASIL), mas duplicada aqui (lista pequena e estavel, nunca muda)
+# porque geographic_analysis.py ja importa DESTE modulo (import circular se
+# fosse ao contrario). Usada so como whitelist defensiva: as 3 funcoes
+# `caminho_*` abaixo constroem um NOME DE ARQUIVO a partir de `uf` - sem
+# validar, um valor de `uf` com "/"/".." embutido escaparia de data/raw
+# (nao explorado pela UI atual, que so usa selectbox de UF, mas estas
+# funcoes nao tinham nenhuma defesa propria contra chamadores futuros).
+_UFS_VALIDAS = {
+    "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
+    "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+}
+
+
+def _validar_uf(uf: str) -> str:
+    uf_norm = uf.strip().upper()
+    if uf_norm not in _UFS_VALIDAS:
+        raise ValueError(f"UF invalida: {uf!r}")
+    return uf_norm
+
 
 def _eleicao_cfg(ano: int) -> dict:
     eleicoes = data_sources().get("eleicoes", {})
@@ -50,16 +70,16 @@ def _eleicao_cfg(ano: int) -> dict:
 
 
 def caminho_votacao_secao(uf: str, ano: int = 2024) -> Path:
-    nome = _eleicao_cfg(ano)["votacao_secao_arquivo"].format(UF=uf.upper())
+    nome = _eleicao_cfg(ano)["votacao_secao_arquivo"].format(UF=_validar_uf(uf))
     return resolve_path("data/raw") / nome
 
 
 def caminho_malha(tipo: str, uf: str) -> Path:
-    return resolve_path("data/raw") / f"{uf.upper()}_{tipo}_CD2022.parquet"
+    return resolve_path("data/raw") / f"{_validar_uf(uf)}_{tipo}_CD2022.parquet"
 
 
 def caminho_perfil_eleitor_secao(uf: str) -> Path:
-    return resolve_path("data/raw") / f"perfil_eleitor_secao_{uf.upper()}.parquet"
+    return resolve_path("data/raw") / f"perfil_eleitor_secao_{_validar_uf(uf)}.parquet"
 
 
 def _pasta_tmp() -> Path:
@@ -99,6 +119,21 @@ def _garantir_votacao_secao_2018_fallback(uf: str, destino: Path) -> bool:
     destino.parent.mkdir(parents=True, exist_ok=True)
     tmp = destino.with_suffix(".tmp")
     tmp.write_bytes(conteudo)
+    # Bug real corrigido: sem validar o conteudo baixado, uma resposta HTTP
+    # 200 com corpo invalido (proxy/captive portal, asset renomeado, etc.)
+    # gravava um arquivo corrompido em `destino` - toda chamada seguinte so
+    # checava `destino.exists()` e nunca mais tentava rebaixar, entao a
+    # corrupcao ficava permanente ate alguem apagar o arquivo manualmente.
+    # Ler o parquet antes do rename garante que so um arquivo estruturalmente
+    # valido vira `destino` - conteudo invalido nunca fica cacheado.
+    try:
+        duckdb.sql(f"SELECT COUNT(*) FROM read_parquet('{tmp.as_posix()}')")
+    except Exception:
+        logger.exception(
+            "Download de votacao_secao 2018 para UF %s nao e um parquet valido - descartado", uf,
+        )
+        tmp.unlink(missing_ok=True)
+        return False
     tmp.rename(destino)
     return True
 

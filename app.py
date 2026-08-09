@@ -973,14 +973,24 @@ def _carregar_dados_candidatura_v2(ano: int, cargo: str, uf: str, municipio_codi
 @st.cache_data(show_spinner=False)
 def _carregar_territorial_turno(
     veio_do_fallback: bool, ano: int, cargo: str, uf: str, municipio_codigo, turno_alvo: int, numero: int, nivel: str,
-) -> pd.DataFrame:
+) -> pd.DataFrame | None:
     """Carrega o desempenho territorial de um turno especifico (1 ou 2)
     para o MESMO candidato - usado pela Comparacao de Turnos, que precisa
-    dos dois turnos independente de qual foi escolhido na selecao guiada."""
-    if veio_do_fallback:
-        cand_t, vc_t, vd_t, rd_t = _carregar_dados_candidatura(numero, municipio_codigo, cargo, ano, turno_alvo)
-    else:
-        cand_t, vc_t, vd_t, rd_t = _carregar_dados_candidatura_v2(ano, cargo, uf, municipio_codigo, turno_alvo, numero)
+    dos dois turnos independente de qual foi escolhido na selecao guiada.
+    Retorna None quando o candidato nao existe nesse turno (bug real
+    corrigido: a maioria das disputas brasileiras de Prefeito/Governador
+    NUNCA tem 2o turno, e mesmo quando tem, so os 2 primeiros colocados
+    avancam - antes disso o `next(...)` sem default de
+    _carregar_dados_candidatura[_v2] estourava StopIteration nao tratado e
+    derrubava a pagina inteira para qualquer candidato comum que abrisse
+    esta secao)."""
+    try:
+        if veio_do_fallback:
+            cand_t, vc_t, vd_t, rd_t = _carregar_dados_candidatura(numero, municipio_codigo, cargo, ano, turno_alvo)
+        else:
+            cand_t, vc_t, vd_t, rd_t = _carregar_dados_candidatura_v2(ano, cargo, uf, municipio_codigo, turno_alvo, numero)
+    except StopIteration:
+        return None
     return desempenho_territorial(cand_t, vc_t, vd_t, rd_t, nivel)
 
 
@@ -2536,49 +2546,57 @@ elif secao == "Comparacao de Turnos":
             candidatura.codigo_municipio_tse, 2, candidatura.numero, _nivel_2t,
         )
 
-    comp_turnos = comparar_turnos(_terr_t1, _terr_t2, _nivel_2t)
-
-    c1, c2, c3, c4 = st.columns(4)
-    _kpi(c1, "Votos 1o turno", _fmt(comp_turnos.votos_turno1))
-    _kpi(c2, "Votos 2o turno", _fmt(comp_turnos.votos_turno2))
-    _kpi(
-        c3, "Variacao absoluta", f"{comp_turnos.variacao_absoluta:+,}".replace(",", "."),
-        tom="bom" if comp_turnos.variacao_absoluta >= 0 else "ruim",
-    )
-    _kpi(
-        c4, "Variacao percentual", f"{comp_turnos.variacao_percentual:+.2f}%",
-        tom="bom" if comp_turnos.variacao_percentual >= 0 else "ruim",
-    )
-
-    c5, c6 = st.columns(2)
-    _kpi(c5, "% votos validos - 1o turno", f"{comp_turnos.pct_validos_turno1}%")
-    _kpi(c6, "% votos validos - 2o turno", f"{comp_turnos.pct_validos_turno2}%")
-
-    with st.container(border=True):
-        st.subheader("Territorios conquistados e perdidos entre os turnos")
-        cc1, cc2 = st.columns(2)
-        with cc1:
-            st.metric("Territorios conquistados", len(comp_turnos.territorios_conquistados))
-            if comp_turnos.territorios_conquistados:
-                amostra = ", ".join(str(t) for t in comp_turnos.territorios_conquistados[:20])
-                st.caption(amostra + (" ..." if len(comp_turnos.territorios_conquistados) > 20 else ""))
-        with cc2:
-            st.metric("Territorios perdidos", len(comp_turnos.territorios_perdidos))
-            if comp_turnos.territorios_perdidos:
-                amostra = ", ".join(str(t) for t in comp_turnos.territorios_perdidos[:20])
-                st.caption(amostra + (" ..." if len(comp_turnos.territorios_perdidos) > 20 else ""))
-
-    if comp_turnos.variacao_comparecimento_pct is not None:
-        with st.container(border=True):
-            st.subheader("Comparecimento")
-            st.metric("Variacao do comparecimento", f"{comp_turnos.variacao_comparecimento_pct:+.2f}%")
-
-    with st.container(border=True):
-        st.subheader("Detalhamento por territorio")
-        st.dataframe(
-            comp_turnos.detalhe_territorial.sort_values("delta_votos", ascending=False),
-            use_container_width=True, height=400,
+    if _terr_t1 is None or _terr_t2 is None:
+        st.info(
+            "Nao ha comparacao para mostrar: este candidato nao tem candidatura "
+            "registrada em um dos dois turnos (a maioria das disputas de "
+            "Prefeito/Governador no Brasil nao vai a 2o turno, e mesmo quando "
+            "vai, so os 2 primeiros colocados do 1o turno avancam)."
         )
+    else:
+        comp_turnos = comparar_turnos(_terr_t1, _terr_t2, _nivel_2t)
+
+        c1, c2, c3, c4 = st.columns(4)
+        _kpi(c1, "Votos 1o turno", _fmt(comp_turnos.votos_turno1))
+        _kpi(c2, "Votos 2o turno", _fmt(comp_turnos.votos_turno2))
+        _kpi(
+            c3, "Variacao absoluta", f"{comp_turnos.variacao_absoluta:+,}".replace(",", "."),
+            tom="bom" if comp_turnos.variacao_absoluta >= 0 else "ruim",
+        )
+        _kpi(
+            c4, "Variacao percentual", f"{comp_turnos.variacao_percentual:+.2f}%",
+            tom="bom" if comp_turnos.variacao_percentual >= 0 else "ruim",
+        )
+
+        c5, c6 = st.columns(2)
+        _kpi(c5, "% votos validos - 1o turno", f"{comp_turnos.pct_validos_turno1}%")
+        _kpi(c6, "% votos validos - 2o turno", f"{comp_turnos.pct_validos_turno2}%")
+
+        with st.container(border=True):
+            st.subheader("Territorios conquistados e perdidos entre os turnos")
+            cc1, cc2 = st.columns(2)
+            with cc1:
+                st.metric("Territorios conquistados", len(comp_turnos.territorios_conquistados))
+                if comp_turnos.territorios_conquistados:
+                    amostra = ", ".join(str(t) for t in comp_turnos.territorios_conquistados[:20])
+                    st.caption(amostra + (" ..." if len(comp_turnos.territorios_conquistados) > 20 else ""))
+            with cc2:
+                st.metric("Territorios perdidos", len(comp_turnos.territorios_perdidos))
+                if comp_turnos.territorios_perdidos:
+                    amostra = ", ".join(str(t) for t in comp_turnos.territorios_perdidos[:20])
+                    st.caption(amostra + (" ..." if len(comp_turnos.territorios_perdidos) > 20 else ""))
+
+        if comp_turnos.variacao_comparecimento_pct is not None:
+            with st.container(border=True):
+                st.subheader("Comparecimento")
+                st.metric("Variacao do comparecimento", f"{comp_turnos.variacao_comparecimento_pct:+.2f}%")
+
+        with st.container(border=True):
+            st.subheader("Detalhamento por territorio")
+            st.dataframe(
+                comp_turnos.detalhe_territorial.sort_values("delta_votos", ascending=False),
+                use_container_width=True, height=400,
+            )
 
 # =============================================================== Comparativo
 elif secao == "Comparativo":
@@ -2654,16 +2672,16 @@ elif secao == "Comparativo":
                 )
 
 # ================================================================ Relatorio
-elif secao == "Relatorio" and not _eh_municipal:
-    st.info(
-        "Relatorio executivo (HTML/PDF/Excel) disponivel apenas para cargos "
-        "municipais nesta versao piloto - os indicadores estaduais podem ser "
-        "conferidos na aba 'Indicadores Estaduais'."
-    )
-
 elif secao == "Relatorio":
     st.write("Gere o relatorio executivo ou exporte os dados desta candidatura.")
-    nivel_relatorio = st.session_state.get("nivel_territorial", "NR_ZONA")
+    nivel_relatorio = "CD_MUNICIPIO" if not _eh_municipal else st.session_state.get("nivel_territorial", "NR_ZONA")
+    # Cargos estaduais/distritais nao tem "bairro" - o territorio de
+    # analise para clustering/regressao/potencial e o MUNICIPIO (UF
+    # inteira), mesmo nivel ja usado e validado nas secoes "Concorrencia"
+    # (IDP/IVE/IEC/QEC) e "Estatistica Avancada" (modo Municipio) para
+    # candidaturas estaduais - nunca o drill-down por bairro de 1
+    # municipio (isso continua so nas secoes de exploracao ad-hoc).
+    _nivel_potencial_rel = _NIVEL_TERRITORIO_DEMOGRAFICO if _eh_municipal else "CD_MUNICIPIO"
     perfil_economico_rel = carregar_perfil_economico_municipio(candidatura)
 
     limitacoes: list[str] = []
@@ -2680,11 +2698,23 @@ elif secao == "Relatorio":
     cenario_mc_rel = None
 
     if uf_tem_malha_completa(candidatura.uf):
-        pontos, enriquecido, avisos_geo = _geo()
-        limitacoes = list(avisos_geo)
-        bairros_agg_rel = agregar_votos_por_bairro(enriquecido)
-        _, enriquecido_secao_rel, _ = _geo_secao()
-        _, base_territorio_rel = _demo(enriquecido_secao_rel)
+        if _eh_municipal:
+            pontos, enriquecido, avisos_geo = _geo()
+            limitacoes = list(avisos_geo)
+            bairros_agg_rel = agregar_votos_por_bairro(enriquecido)
+            _, enriquecido_secao_rel, _ = _geo_secao()
+            _, base_territorio_rel = _demo(enriquecido_secao_rel)
+        else:
+            _, enriquecido_uf_rel, avisos_geo = _geo_uf()
+            limitacoes = list(avisos_geo)
+            terr_mun_rel = desempenho_territorial(candidatura, vc, vd, rd, "CD_MUNICIPIO")
+            terr_mun_rel = terr_mun_rel.merge(
+                vd[["CD_MUNICIPIO", "NM_MUNICIPIO"]].drop_duplicates(), on="CD_MUNICIPIO", how="left"
+            )
+            bairros_agg_rel = terr_mun_rel.rename(columns={"NM_MUNICIPIO": "municipio"})[
+                ["municipio", "votos_candidato", "pct_votos_validos_territorio", "colocacao"]
+            ].sort_values("votos_candidato", ascending=False).reset_index(drop=True)
+            _, base_territorio_rel = _demo_uf(enriquecido_uf_rel)
         if not base_territorio_rel.empty:
             variaveis_disp = [v for v in VARIAVEIS_DEMOGRAFICAS if v in base_territorio_rel.columns]
             corr_rel, _ = correlacoes_com_votos(base_territorio_rel, "votos_candidato", variaveis_disp)
@@ -2696,7 +2726,7 @@ elif secao == "Relatorio":
             if resultado_clustering_rel:
                 narrativa_rel = gerar_narrativa_clusters(resultado_clustering_rel, "votos_candidato")
                 potencial_rel = identificar_bairros_potencial(
-                    resultado_clustering_rel, modelo_log_rel, _NIVEL_TERRITORIO_DEMOGRAFICO, "votos_candidato",
+                    resultado_clustering_rel, modelo_log_rel, _nivel_potencial_rel, "votos_candidato",
                 )
             modelo_lin_rel = None
             if modelo_log_rel is None:
@@ -2716,10 +2746,10 @@ elif secao == "Relatorio":
                 coluna_cluster=_COLUNA_CLUSTER_REGRESSAO,
             )
             if reg_pct_rel is not None:
-                simulacao_mc_rel = simular_regressao_linear(reg_pct_rel, base_territorio_rel, _NIVEL_TERRITORIO_DEMOGRAFICO)
+                simulacao_mc_rel = simular_regressao_linear(reg_pct_rel, base_territorio_rel, _nivel_potencial_rel)
                 if simulacao_mc_rel is not None:
                     cenario_mc_rel = cenario_agregado_votos(
-                        simulacao_mc_rel, base_territorio_rel, _NIVEL_TERRITORIO_DEMOGRAFICO, "votos_validos_territorio",
+                        simulacao_mc_rel, base_territorio_rel, _nivel_potencial_rel, "votos_validos_territorio",
                     )
     else:
         limitacoes = [f"Malha geografica nao configurada para a UF '{candidatura.uf}'."]
@@ -2744,7 +2774,7 @@ elif secao == "Relatorio":
     if not rivais_sim_rel.empty:
         figuras["Rivais por similaridade de base eleitoral"] = charts.grafico_rivais_similaridade(rivais_sim_rel)
     if potencial_rel is not None and not potencial_rel.empty:
-        figuras["Territorios com maior potencial"] = charts.grafico_bairros_potencial(potencial_rel, _NIVEL_TERRITORIO_DEMOGRAFICO)
+        figuras["Territorios com maior potencial"] = charts.grafico_bairros_potencial(potencial_rel, _nivel_potencial_rel)
     if (
         resultado_maslow_rel is not None
         and not resultado_maslow_rel.tiers_mapeados.empty
@@ -2771,12 +2801,17 @@ elif secao == "Relatorio":
         comparativo_historico=comparativo_historico_rel,
     )
 
+    # Cargos estaduais/distritais nao tem codigo de municipio (candidatura
+    # cobre a UF inteira) - usa a UF como sufixo do nome de arquivo nesse
+    # caso, em vez de literalmente escrever "None" no nome baixado.
+    _sufixo_arquivo_rel = candidatura.codigo_municipio_tse if candidatura.codigo_municipio_tse is not None else candidatura.uf
+
     col1, col2, col3, col4, col5, col6 = st.columns(6)
     with col1:
         html_bytes = gerar_relatorio_html(dados_relatorio).encode("utf-8")
         st.download_button("Baixar relatorio HTML", html_bytes, file_name=f"relatorio_{candidatura.nome_urna}.html")
     with col2:
-        pdf_path = resolve_path(f"outputs/reports/relatorio_{candidatura.numero}_{candidatura.codigo_municipio_tse}.pdf")
+        pdf_path = resolve_path(f"outputs/reports/relatorio_{candidatura.numero}_{_sufixo_arquivo_rel}.pdf")
         gerar_relatorio_pdf(dados_relatorio, pdf_path)
         st.download_button("Baixar relatorio PDF", pdf_path.read_bytes(), file_name=pdf_path.name)
     with col3:
@@ -2818,14 +2853,14 @@ elif secao == "Relatorio":
         if resultado_maslow_rel is not None and resultado_maslow_rel.fonte_efeito != "indisponivel":
             planilhas["Maslow_Tiers"] = resultado_maslow_rel.tiers_mapeados
             planilhas["Maslow_Sem_Proxy"] = resultado_maslow_rel.tiers_sem_proxy
-        xlsx_path = resolve_path(f"outputs/reports/dados_{candidatura.numero}_{candidatura.codigo_municipio_tse}.xlsx")
+        xlsx_path = resolve_path(f"outputs/reports/dados_{candidatura.numero}_{_sufixo_arquivo_rel}.xlsx")
         exportar_excel(xlsx_path, planilhas)
         st.download_button("Baixar dados (Excel)", xlsx_path.read_bytes(), file_name=xlsx_path.name)
 
     col7, col8 = st.columns(2)
     with col7:
         estrategia_pdf_path = resolve_path(
-            f"outputs/reports/relatorio_estrategia_{candidatura.numero}_{candidatura.codigo_municipio_tse}.pdf"
+            f"outputs/reports/relatorio_estrategia_{candidatura.numero}_{_sufixo_arquivo_rel}.pdf"
         )
         gerar_relatorio_estrategia_pdf(dados_relatorio, estrategia_pdf_path)
         st.download_button(
@@ -2833,7 +2868,7 @@ elif secao == "Relatorio":
         )
     with col8:
         comparativo_pdf_path = resolve_path(
-            f"outputs/reports/relatorio_comparativo_{candidatura.numero}_{candidatura.codigo_municipio_tse}.pdf"
+            f"outputs/reports/relatorio_comparativo_{candidatura.numero}_{_sufixo_arquivo_rel}.pdf"
         )
         gerar_relatorio_comparativo_pdf(dados_relatorio, comparativo_pdf_path)
         st.download_button(
