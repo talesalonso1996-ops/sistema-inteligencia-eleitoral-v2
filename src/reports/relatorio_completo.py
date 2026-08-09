@@ -54,11 +54,17 @@ def _fmt_pct(v, casas: int = 2) -> str:
         return str(v)
 
 
-def gerar_relatorio_completo_html(dados: DadosRelatorio) -> str:
+def _montar_paginas(dados: DadosRelatorio, contador_pagina: int = 2) -> tuple[list[str], int]:
+    """Monta a lista de paginas do Tipo 1 completo (capa + todas as
+    secoes, sem envolver em ds.head()) - extraido de
+    gerar_relatorio_completo_html() para ser reaproveitado pelo Tipo 4
+    (relatorio_aprofundado.py), que injeta 1 secao nova (IDP/IVE/IEC/QEC)
+    antes de "Limitacoes e fontes" sem duplicar as ~14 secoes deste
+    modulo. Retorna (paginas, proximo_contador_pagina) - o chamador decide
+    onde inserir paginas extras antes de "Limitacoes" (sempre a ultima)."""
     c = dados.candidatura
     rg = dados.resultado_geral
     paginas: list[str] = []
-    contador_pagina = 2  # capa=1
 
     # ---------------------------------------------------------------- CAPA
     situacao_tom = "green" if (rg.colocacao_geral or 0) <= rg.total_concorrentes / 2 else "amber"
@@ -244,13 +250,71 @@ def gerar_relatorio_completo_html(dados: DadosRelatorio) -> str:
         paginas.append(ds.pagina("Contexto economico", "Fonte: RAIS Estabelecimentos + Novo CAGED",
                                   "Mercado de trabalho do municipio", corpo, pagina_num=contador_pagina))
 
-    # ------------------------------------------------------- LIMITACOES
-    contador_pagina += 1
+    return paginas, contador_pagina
+
+
+def _pagina_limitacoes(dados: DadosRelatorio, contador_pagina: int) -> str:
+    """Sempre a ULTIMA pagina do relatorio (Tipo 1 e Tipo 4) - extraida
+    para reaproveitar entre os dois sem duplicar a lista de limitacoes."""
     limitacoes_todas = list(dados.limitacoes) + limitacoes_gerador()
     corpo = "<ul class='tight'>" + "".join(f"<li>{l}</li>" for l in limitacoes_todas) + "</ul>"
-    paginas.append(ds.pagina("Limitacoes e fontes", "Nota final",
-                              "O que este relatorio nao sabe, e de onde vem o que ele sabe", corpo,
-                              pagina_num=contador_pagina))
+    return ds.pagina("Limitacoes e fontes", "Nota final",
+                      "O que este relatorio nao sabe, e de onde vem o que ele sabe", corpo,
+                      pagina_num=contador_pagina)
 
+
+def gerar_relatorio_completo_html(dados: DadosRelatorio) -> str:
+    c = dados.candidatura
+    paginas, contador_pagina = _montar_paginas(dados)
+    contador_pagina += 1
+    paginas.append(_pagina_limitacoes(dados, contador_pagina))
     html = ds.head(f"Relatorio SIET - {c.nome_urna}") + "\n".join(paginas)
+    return html
+
+
+def gerar_relatorio_resumido_html(dados: DadosRelatorio) -> str:
+    """Versao RESUMIDA (1-2 paginas, so os KPIs principais) do mesmo
+    design system A4 - para quem quer uma visao rapida antes de abrir a
+    versao Completa (~15-20 paginas). Mesmos dados ja calculados, nenhum
+    calculo novo - so um recorte menor do que ja existe em
+    gerar_relatorio_completo_html."""
+    c = dados.candidatura
+    rg = dados.resultado_geral
+
+    situacao_tom = "green" if (rg.colocacao_geral or 0) <= rg.total_concorrentes / 2 else "amber"
+    badges = (
+        ds.badge(c.resultado_final, situacao_tom)
+        + f'<span style="font-size:12.5px; color:#cfe0f2;">Eleicao {c.ano_eleicao} '
+        f'&middot; {rg.colocacao_geral or "n/d"}o de {rg.total_concorrentes} &middot; {_fmt(rg.total_votos)} votos</span>'
+    )
+    capa = ds.capa(
+        titulo=c.nome_urna,
+        subtitulo=f'"{c.nome_urna}" &middot; {c.cargo.title()} &middot; {c.municipio}/{c.uf} - Versao Resumida<br/>{c.partido_sigla} - {c.partido_nome}',
+        badges_html=badges,
+        rodape_esq="Dados oficiais TSE (candidaturas, votacao por secao)",
+        rodape_dir=f"Gerado automaticamente pelo SIET em {datetime.now().strftime('%d/%m/%Y')}<br/>Leitura territorial, nunca individual. O voto e secreto.",
+    )
+
+    corpo = ds.kpi_grid([
+        ("Total de votos", _fmt(rg.total_votos), _fmt_pct(rg.pct_votos_validos), ""),
+        ("Colocacao", f"{rg.colocacao_geral or 'n/d'}o", f"de {rg.total_concorrentes}", ""),
+        ("1o colocado", _fmt(rg.votos_primeiro_colocado), rg.nome_primeiro_colocado, ""),
+        ("Distancia p/ 1o colocado", _fmt(rg.distancia_para_primeiro_colocado), "votos", "red" if rg.distancia_para_primeiro_colocado else ""),
+    ])
+    corpo += ds.tabela_df(dados.territorial_indice, max_linhas=10)
+    if dados.rivais_similaridade is not None and not dados.rivais_similaridade.empty:
+        corpo += "<h3 style='margin-top:18px;'>Principal rival (mesma base eleitoral)</h3>"
+        corpo += ds.tabela_df(dados.rivais_similaridade.head(1))
+    limitacoes_todas = list(dados.limitacoes) + limitacoes_gerador()
+    corpo += ds.callout(
+        "Versao resumida - so os KPIs principais e o territorio de melhor desempenho. "
+        "A versao Completa cobre regressao, clusters, potencial de crescimento, contexto "
+        "economico e mais. " + " ".join(limitacoes_todas), "Sobre esta versao", "warn",
+    )
+    pagina_resumo = ds.pagina(
+        "Resumo executivo", "Fonte: TSE - candidaturas e votacao por secao",
+        "Numeros-chave do resultado", corpo, pagina_num=2,
+    )
+
+    html = ds.head(f"Relatorio SIET (Resumido) - {c.nome_urna}") + capa + pagina_resumo
     return html

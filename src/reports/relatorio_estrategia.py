@@ -198,6 +198,54 @@ def gerar_relatorio_estrategia_html(dados: DadosRelatorio) -> str:
     return html
 
 
+def gerar_relatorio_estrategia_resumido_html(dados: DadosRelatorio) -> str:
+    """Versao RESUMIDA (1-2 paginas) - so o KPI de resumo e o top 3 do
+    plano de acao priorizado, sem as secoes de rivais/patrimonio/clusters/
+    Maslow por extenso. Mesmos dados ja calculados, nenhum calculo novo."""
+    c = dados.candidatura
+    badges = (
+        ds.badge("Estrategia - Resumido", "navy")
+        + f'<span style="font-size:12.5px; color:#cfe0f2;">Eleicao {c.ano_eleicao} '
+        f'&middot; {c.cargo.title()} &middot; {c.municipio}/{c.uf}</span>'
+    )
+    capa = ds.capa(
+        titulo=c.nome_urna,
+        subtitulo=f"Relatorio de Estrategia (Resumido) &middot; Visao rapida<br/>{c.partido_sigla} - {c.partido_nome}",
+        badges_html=badges,
+        rodape_esq="Dados oficiais TSE (candidaturas, votacao por secao, patrimonio declarado)",
+        rodape_dir=f"Gerado automaticamente pelo SIET em {datetime.now().strftime('%d/%m/%Y')}<br/>Leitura territorial, nunca individual. O voto e secreto.",
+    )
+
+    n_potencial = len(dados.bairros_potencial) if dados.bairros_potencial is not None else 0
+    n_rivais = len(dados.rivais_similaridade) if dados.rivais_similaridade is not None else 0
+    corpo = ds.kpi_grid([
+        ("Territorios de investimento mapeados", str(n_potencial), "maior potencial de crescimento", ""),
+        ("Rivais diretos identificados", str(n_rivais), "mesma base eleitoral", ""),
+        ("Candidatura", c.nome_urna, c.resultado_final, ""),
+    ], cols=3)
+
+    if dados.bairros_potencial is not None and not dados.bairros_potencial.empty:
+        col_territorio = dados.bairros_potencial.columns[0]
+        corpo += "<h3 style='margin-top:18px;'>Top 3 territorios prioritarios</h3>"
+        corpo += "<ul class='tight'>"
+        for _, row in dados.bairros_potencial.reset_index(drop=True).head(3).iterrows():
+            corpo += f"<li><strong>{row[col_territorio]}:</strong> {row['justificativa']}</li>"
+        corpo += "</ul>"
+
+    limitacoes_todas = list(dados.limitacoes) + limitacoes_gerador()
+    corpo += ds.callout(
+        "Versao resumida - so os KPIs principais e o top 3 do plano de acao. A versao Completa "
+        "cobre rivais diretos, patrimonio comparativo, segmentacao territorial e Piramide de "
+        "Maslow. " + " ".join(limitacoes_todas), "Sobre esta versao", "warn",
+    )
+    pagina_resumo = ds.pagina(
+        "Resumo estrategico", "Fonte: identificar_bairros_potencial + rivais_por_similaridade_eleitorado",
+        "Visao rapida para decisao imediata", corpo, pagina_num=2,
+    )
+
+    return ds.head(f"Relatorio de Estrategia SIET (Resumido) - {c.nome_urna}") + capa + pagina_resumo
+
+
 def gerar_relatorio_estrategia_pdf(dados: DadosRelatorio, caminho: str | Path) -> Path:
     """Versao PDF resumida do relatorio de estrategia - mesmo padrao
     (ReportLab, tema claro, tabelas + texto) ja usado por

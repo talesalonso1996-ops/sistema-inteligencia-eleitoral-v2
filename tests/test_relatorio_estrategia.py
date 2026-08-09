@@ -14,6 +14,7 @@ from src.report_generator import DadosRelatorio
 from src.reports.relatorio_estrategia import (
     gerar_relatorio_estrategia_html,
     gerar_relatorio_estrategia_pdf,
+    gerar_relatorio_estrategia_resumido_html,
     limitacoes_gerador,
 )
 
@@ -108,6 +109,19 @@ def test_plano_de_acao_reflete_ranking_real_de_potencial(candidatura_sp, dados_d
     primeiro_territorio = str(dados.bairros_potencial.iloc[0][col_territorio])
     assert "Plano de acao priorizado" in html
     assert f"Prioridade 1 - {primeiro_territorio}" in html
+
+
+def test_gerar_relatorio_estrategia_resumido_e_bem_menor_que_o_completo(candidatura_sp, dados_disputa, ranking_sp, base_territorio_sp):
+    dados = _construir_dados_relatorio(candidatura_sp, dados_disputa, ranking_sp, base_territorio_sp)
+    html_completo = gerar_relatorio_estrategia_html(dados)
+    html_resumido = gerar_relatorio_estrategia_resumido_html(dados)
+    assert candidatura_sp.nome_urna in html_resumido
+    assert html_resumido.count('<div class="page">') == 1
+    assert html_resumido.count('<div class="page">') < html_completo.count('<div class="page">')
+    if dados.bairros_potencial is not None and not dados.bairros_potencial.empty:
+        col_territorio = dados.bairros_potencial.columns[0]
+        primeiro_territorio = str(dados.bairros_potencial.iloc[0][col_territorio])
+        assert primeiro_territorio in html_resumido
 
 
 def test_pdf_estrategia_gera_arquivo_real_com_dados_completos(candidatura_sp, dados_disputa, ranking_sp, base_territorio_sp, tmp_path):

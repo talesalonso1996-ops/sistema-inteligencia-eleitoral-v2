@@ -7,7 +7,11 @@ from src.potential_index import calcular_indice_performance
 from src.projections.monte_carlo import cenario_agregado_votos, simular_regressao_linear
 from src.regression_models import regressao_linear_votos
 from src.report_generator import DadosRelatorio
-from src.reports.relatorio_completo import gerar_relatorio_completo_html, limitacoes_gerador
+from src.reports.relatorio_completo import (
+    gerar_relatorio_completo_html,
+    gerar_relatorio_resumido_html,
+    limitacoes_gerador,
+)
 from src.state_scope_indicators import calcular_concentracao_territorial
 
 _NIVEL = "NR_ZONA"
@@ -88,3 +92,15 @@ def test_cenario_monte_carlo_aparece_no_html_quando_disponivel(candidatura_sp, d
     if dados.cenario_monte_carlo is not None:
         assert "Cenarios de votos (Monte Carlo)" in html
         assert "Simulacao de Monte Carlo PARAMETRICA" in html
+
+
+def test_gerar_relatorio_resumido_e_bem_menor_que_o_completo(candidatura_sp, dados_disputa, ranking_sp, base_territorio_sp):
+    """Item 1 das melhorias pos-Etapa 8: versao Resumida precisa ser
+    genuinamente menor (1-2 paginas) que a Completa (~10+ paginas com
+    dado real), nao um sinonimo do mesmo conteudo."""
+    dados = _construir_dados_relatorio(candidatura_sp, dados_disputa, ranking_sp, base_territorio_sp)
+    html_completo = gerar_relatorio_completo_html(dados)
+    html_resumido = gerar_relatorio_resumido_html(dados)
+    assert candidatura_sp.nome_urna in html_resumido
+    assert html_resumido.count('<div class="page">') == 1  # capa + 1 pagina de conteudo
+    assert html_resumido.count('<div class="page">') < html_completo.count('<div class="page">')

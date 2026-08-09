@@ -16,6 +16,7 @@ from src.reports.relatorio_comparativo import (
     _fmt,
     gerar_relatorio_comparativo_html,
     gerar_relatorio_comparativo_pdf,
+    gerar_relatorio_comparativo_resumido_html,
     limitacoes_gerador,
 )
 
@@ -132,6 +133,32 @@ def test_gerar_relatorio_comparativo_funciona_sem_campo_preenchido(candidatura_s
     html = gerar_relatorio_comparativo_html(dados)
     assert candidatura_sp.nome_urna in html
     assert html.count('class="page') >= 3
+
+
+def test_relatorio_comparativo_resumido_cobre_os_3_cenarios(ranking_sp, tmp_path, candidatura_sp, dados_disputa):
+    """Versao Resumida precisa cobrir as 3 situacoes reais possiveis (mesma
+    logica ja testada na versao completa), sempre em 1-2 paginas."""
+    # caso encontrado com territorio (Garry Deralus, 2024 vs 2022)
+    candidatos = buscar_candidatos_disputa(2024, "VEREADOR", "SP", municipio_codigo=71072, turno=1, numero=13010)
+    candidatura = candidatos[0]
+    vc = votos_da_candidatura(candidatura)
+    vd = votos_da_disputa(candidatura)
+    rd = registro_candidatos_disputa(candidatura)
+    dados_com_territorio, comparativo = _dados_relatorio_com_comparativo(candidatura, vc, vd, rd, ranking_sp)
+    assert comparativo.candidatura_comparavel is not None
+    html_com_territorio = gerar_relatorio_comparativo_resumido_html(dados_com_territorio)
+    assert html_com_territorio.count('<div class="page">') == 1
+    assert "Comparativo territorial real encontrado" in html_com_territorio
+
+    # caso nao encontrado (Aline Torres)
+    vc2, vd2, rd2 = dados_disputa
+    dados_nao_encontrado, comparativo2 = _dados_relatorio_com_comparativo(candidatura_sp, vc2, vd2, rd2, ranking_sp)
+    assert comparativo2.candidatura_comparavel is None
+    html_nao_encontrado = gerar_relatorio_comparativo_resumido_html(dados_nao_encontrado)
+    assert "Nenhuma segunda disputa comparavel encontrada" in html_nao_encontrado
+
+    html_completo = gerar_relatorio_comparativo_html(dados_com_territorio)
+    assert html_com_territorio.count('<div class="page">') < html_completo.count('<div class="page">')
 
 
 def test_pdf_comparativo_com_territorio_gera_arquivo_real(ranking_sp, tmp_path):

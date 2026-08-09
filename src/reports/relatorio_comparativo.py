@@ -167,6 +167,63 @@ def gerar_relatorio_comparativo_html(dados: DadosRelatorio) -> str:
     return html
 
 
+def gerar_relatorio_comparativo_resumido_html(dados: DadosRelatorio) -> str:
+    """Versao RESUMIDA (1-2 paginas) - so a capa + o resumo executivo, que
+    ja cobre as 3 situacoes reais possiveis (comparativo territorial
+    encontrado / segunda candidatura sem territorio / nao encontrado).
+    A versao Completa acrescenta o detalhamento zona a zona quando ha
+    comparativo territorial real."""
+    c = dados.candidatura
+    comp = dados.comparativo_historico
+
+    badges = (
+        ds.badge("Comparativo - Resumido", "navy")
+        + f'<span style="font-size:12.5px; color:#cfe0f2;">Eleicao {c.ano_eleicao} '
+        f'&middot; {c.cargo.title()} &middot; {c.municipio}/{c.uf}</span>'
+    )
+    capa = ds.capa(
+        titulo=c.nome_urna,
+        subtitulo="Relatorio Comparativo/Historico (Resumido)<br/>" f"{c.partido_sigla} - {c.partido_nome}",
+        badges_html=badges,
+        rodape_esq="Dados oficiais TSE (consulta_cand, votacao por secao)",
+        rodape_dir=f"Gerado automaticamente pelo SIET em {datetime.now().strftime('%d/%m/%Y')}<br/>Leitura territorial, nunca individual. O voto e secreto.",
+    )
+
+    encontrado = comp is not None and comp.candidatura_comparavel is not None
+    com_territorio = encontrado and comp.comparativo_zonas is not None and not comp.comparativo_zonas.empty
+    if com_territorio:
+        situacao_label, situacao_tom = "Comparativo territorial real encontrado", "good"
+    elif encontrado:
+        situacao_label, situacao_tom = "Segunda candidatura encontrada, sem dado territorial", "warn"
+    else:
+        situacao_label, situacao_tom = "Nenhuma segunda disputa comparavel encontrada", "warn"
+    corpo = ds.callout(
+        "Esta e a versao automatica: o sistema procura, por nome declarado + UF, uma segunda "
+        "disputa REAL da mesma pessoa nos anos com dado carregado neste projeto (2022 e 2024) - "
+        "nunca inventa uma trajetoria quando nao encontra.",
+        situacao_label, situacao_tom,
+    )
+    if com_territorio:
+        cand_a, cand_b = comp.candidatura_atual, comp.candidatura_comparavel
+        corpo += ds.kpi_grid([
+            (f"{cand_a.ano_eleicao} - {cand_a.cargo.title()}", _fmt(cand_a.total_votos), cand_a.resultado_final, ""),
+            (f"{cand_b.ano_eleicao} - {cand_b.cargo.title()}", _fmt(comp.votos_totais_comparavel), cand_b.resultado_final, ""),
+            ("Zonas em comum", str(comp.n_zonas_comuns), "presentes nos dois anos", ""),
+            ("Correlacao territorial", f"{comp.correlacao_territorial:.3f}" if comp.correlacao_territorial is not None else "n/d", "Pearson", ""),
+        ])
+    if comp is not None:
+        corpo += "<ul class='tight'>" + "".join(f"<li>{limitacao}</li>" for limitacao in comp.limitacoes) + "</ul>"
+    limitacoes_todas = list(dados.limitacoes) + limitacoes_gerador()
+    corpo += ds.callout(
+        "Versao resumida - a versao Completa acrescenta o detalhamento zona a zona quando ha "
+        "comparativo territorial real. " + " ".join(limitacoes_todas), "Sobre esta versao", "warn",
+    )
+    pagina_resumo = ds.pagina("Resumo executivo", "Relatorio Comparativo",
+                               "O que este relatorio encontrou", corpo, pagina_num=2)
+
+    return ds.head(f"Relatorio Comparativo SIET (Resumido) - {c.nome_urna}") + capa + pagina_resumo
+
+
 def _tabela_reportlab(linhas: list[list[str]], col_widths: list[float]) -> Table:
     tabela = Table(linhas, colWidths=col_widths)
     tabela.setStyle(TableStyle([

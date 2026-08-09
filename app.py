@@ -97,9 +97,18 @@ from src.maslow_analysis import gerar_analise_maslow
 from src.potential_analysis import identificar_bairros_potencial
 from src.projections.monte_carlo import cenario_agregado_votos, simular_regressao_linear
 from src.candidate_history import montar_comparativo_historico
-from src.reports.relatorio_completo import gerar_relatorio_completo_html
-from src.reports.relatorio_comparativo import gerar_relatorio_comparativo_html, gerar_relatorio_comparativo_pdf
-from src.reports.relatorio_estrategia import gerar_relatorio_estrategia_html, gerar_relatorio_estrategia_pdf
+from src.reports.relatorio_aprofundado import gerar_relatorio_aprofundado_html
+from src.reports.relatorio_completo import gerar_relatorio_completo_html, gerar_relatorio_resumido_html
+from src.reports.relatorio_comparativo import (
+    gerar_relatorio_comparativo_html,
+    gerar_relatorio_comparativo_pdf,
+    gerar_relatorio_comparativo_resumido_html,
+)
+from src.reports.relatorio_estrategia import (
+    gerar_relatorio_estrategia_html,
+    gerar_relatorio_estrategia_pdf,
+    gerar_relatorio_estrategia_resumido_html,
+)
 from src.potential_index import calcular_indice_performance
 from src.regression_models import regressao_linear_votos, regressao_logistica_bom_desempenho
 from src.report_generator import DadosRelatorio, gerar_relatorio_html, gerar_relatorio_pdf
@@ -2835,6 +2844,42 @@ elif secao == "Relatorio":
 
     rivais_sim_rel, _ = rivais_por_similaridade_eleitorado(candidatura, vd, rd, nivel_relatorio, top_n=3)
 
+    # IDP/IVE/IEC/QEC do candidato x rivais - mesmo calculo ja usado na
+    # secao "Concorrencia" (Etapa 9), agora tambem alimentando o Tipo 4
+    # (Aprofundado). Nunca recalcula formula nova.
+    indices_desempenho_candidato_rel = calcular_indices_desempenho_real(
+        candidatura, vc, vd, rd, nivel_relatorio,
+    ).valores()
+    linhas_desempenho_rivais_rel = [{"nome_urna": candidatura.nome_urna, **indices_desempenho_candidato_rel}]
+    nomes_radar_rel = [candidatura.nome_urna]
+    valores_radar_rel = [indices_desempenho_candidato_rel]
+    if not rivais_sim_rel.empty:
+        registro_por_numero_rel = rd.drop_duplicates("numero").set_index("numero")
+        for linha in rivais_sim_rel.itertuples():
+            registro_rival_rel = (
+                registro_por_numero_rel.loc[int(linha.numero)]
+                if int(linha.numero) in registro_por_numero_rel.index else None
+            )
+            candidatura_rival_rel = Candidatura(
+                numero=int(linha.numero), nome_completo=linha.nome_urna, nome_urna=linha.nome_urna,
+                cargo=candidatura.cargo, municipio=candidatura.municipio,
+                codigo_municipio_tse=candidatura.codigo_municipio_tse, uf=candidatura.uf,
+                ano_eleicao=candidatura.ano_eleicao, turno=candidatura.turno,
+                partido_sigla=linha.partido_sigla,
+                partido_nome=str(registro_rival_rel["partido_nome"]) if registro_rival_rel is not None else "",
+                coligacao_federacao=str(registro_rival_rel["coligacao_federacao"]) if registro_rival_rel is not None else "",
+                situacao_candidatura=str(registro_rival_rel["situacao_candidatura"]) if registro_rival_rel is not None else "",
+                resultado_final=str(registro_rival_rel["resultado_final"]) if registro_rival_rel is not None else "",
+                total_votos=int(linha.total_votos_rival), zonas_com_votos=int(linha.territorios_em_comum),
+            )
+            vc_rival_rel = vd[vd["NR_VOTAVEL"] == candidatura_rival_rel.numero]
+            indices_rival_rel = calcular_indices_desempenho_real(
+                candidatura_rival_rel, vc_rival_rel, vd, rd, nivel_relatorio,
+            ).valores()
+            linhas_desempenho_rivais_rel.append({"nome_urna": linha.nome_urna, **indices_rival_rel})
+            nomes_radar_rel.append(linha.nome_urna)
+            valores_radar_rel.append(indices_rival_rel)
+
     terr_rel = desempenho_territorial(candidatura, vc, vd, rd, nivel_relatorio)
     hhi_rel = indice_concentracao_hhi(terr_rel)
     terr_class_rel = zonas_de_disputa(terr_rel, vd, rd, candidatura, nivel_relatorio)
@@ -2865,6 +2910,8 @@ elif secao == "Relatorio":
         )
     if perfil_economico_rel.disponivel:
         figuras["Perfil economico do municipio (RAIS/CAGED)"] = charts.grafico_perfil_economico_municipio(perfil_economico_rel)
+    if len(nomes_radar_rel) > 1:
+        figuras["Desempenho eleitoral real (IDP/IVE/IEC/QEC)"] = charts.grafico_radar_desempenho(nomes_radar_rel, valores_radar_rel)
 
     dados_relatorio = DadosRelatorio(
         candidatura=candidatura, resultado_geral=rg, ranking=ranking,
@@ -2878,6 +2925,8 @@ elif secao == "Relatorio":
         cenario_monte_carlo=cenario_mc_rel, simulacao_monte_carlo=simulacao_mc_rel,
         patrimonio_comparativo=patrimonio_comparativo_rel,
         comparativo_historico=comparativo_historico_rel,
+        indices_desempenho_candidato=indices_desempenho_candidato_rel,
+        indices_desempenho_rivais=pd.DataFrame(linhas_desempenho_rivais_rel),
     )
 
     # Cargos estaduais/distritais nao tem codigo de municipio (candidatura
@@ -2885,39 +2934,84 @@ elif secao == "Relatorio":
     # caso, em vez de literalmente escrever "None" no nome baixado.
     _sufixo_arquivo_rel = candidatura.codigo_municipio_tse if candidatura.codigo_municipio_tse is not None else candidatura.uf
 
-    col1, col2, col3, col4, col5, col6 = st.columns(6)
+    st.markdown("#### 📄 Resumido — visao rapida (1-2 paginas)")
+    colr1, colr2, colr3 = st.columns(3)
+    with colr1:
+        resumido_completo_bytes = gerar_relatorio_resumido_html(dados_relatorio).encode("utf-8")
+        st.download_button(
+            "Tipo 1 - Completo (resumido)", resumido_completo_bytes,
+            file_name=f"relatorio_resumido_{candidatura.nome_urna}.html",
+        )
+    with colr2:
+        resumido_estrategia_bytes = gerar_relatorio_estrategia_resumido_html(dados_relatorio).encode("utf-8")
+        st.download_button(
+            "Tipo 2 - Estrategia (resumido)", resumido_estrategia_bytes,
+            file_name=f"relatorio_estrategia_resumido_{candidatura.nome_urna}.html",
+        )
+    with colr3:
+        resumido_comparativo_bytes = gerar_relatorio_comparativo_resumido_html(dados_relatorio).encode("utf-8")
+        st.download_button(
+            "Tipo 3 - Comparativo (resumido)", resumido_comparativo_bytes,
+            file_name=f"relatorio_comparativo_resumido_{candidatura.nome_urna}.html",
+        )
+
+    st.markdown("#### 📋 Completo — analise detalhada")
+    colc1, colc2, colc3 = st.columns(3)
+    with colc1:
+        completo_bytes = gerar_relatorio_completo_html(dados_relatorio).encode("utf-8")
+        st.download_button(
+            "Tipo 1 - Completo (rico)", completo_bytes,
+            file_name=f"relatorio_completo_{candidatura.nome_urna}.html",
+        )
+    with colc2:
+        estrategia_bytes = gerar_relatorio_estrategia_html(dados_relatorio).encode("utf-8")
+        st.download_button(
+            "Tipo 2 - Estrategia", estrategia_bytes,
+            file_name=f"relatorio_estrategia_{candidatura.nome_urna}.html",
+        )
+    with colc3:
+        comparativo_bytes = gerar_relatorio_comparativo_html(dados_relatorio).encode("utf-8")
+        st.download_button(
+            "Tipo 3 - Comparativo", comparativo_bytes,
+            file_name=f"relatorio_comparativo_{candidatura.nome_urna}.html",
+        )
+
+    st.markdown("#### 🔬 Aprofundado — Tipo 1 + Desempenho eleitoral real (IDP/IVE/IEC/QEC)")
+    aprofundado_bytes = gerar_relatorio_aprofundado_html(dados_relatorio).encode("utf-8")
+    st.download_button(
+        "Tipo 4 - Aprofundado", aprofundado_bytes,
+        file_name=f"relatorio_aprofundado_{candidatura.nome_urna}.html",
+    )
+
+    st.markdown("#### 📥 PDF e outros formatos")
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         html_bytes = gerar_relatorio_html(dados_relatorio).encode("utf-8")
-        st.download_button("Baixar relatorio HTML", html_bytes, file_name=f"relatorio_{candidatura.nome_urna}.html")
+        st.download_button("HTML basico", html_bytes, file_name=f"relatorio_{candidatura.nome_urna}.html")
     with col2:
         pdf_path = resolve_path(f"outputs/reports/relatorio_{candidatura.numero}_{_sufixo_arquivo_rel}.pdf")
         gerar_relatorio_pdf(dados_relatorio, pdf_path)
-        st.download_button("Baixar relatorio PDF", pdf_path.read_bytes(), file_name=pdf_path.name)
+        st.download_button("Tipo 1 (PDF)", pdf_path.read_bytes(), file_name=pdf_path.name)
     with col3:
-        completo_bytes = gerar_relatorio_completo_html(dados_relatorio).encode("utf-8")
-        st.download_button(
-            "Baixar relatorio completo (rico)", completo_bytes,
-            file_name=f"relatorio_completo_{candidatura.nome_urna}.html",
+        estrategia_pdf_path = resolve_path(
+            f"outputs/reports/relatorio_estrategia_{candidatura.numero}_{_sufixo_arquivo_rel}.pdf"
         )
+        gerar_relatorio_estrategia_pdf(dados_relatorio, estrategia_pdf_path)
+        st.download_button("Tipo 2 (PDF)", estrategia_pdf_path.read_bytes(), file_name=estrategia_pdf_path.name)
     with col4:
-        estrategia_bytes = gerar_relatorio_estrategia_html(dados_relatorio).encode("utf-8")
-        st.download_button(
-            "Baixar relatorio de estrategia", estrategia_bytes,
-            file_name=f"relatorio_estrategia_{candidatura.nome_urna}.html",
+        comparativo_pdf_path = resolve_path(
+            f"outputs/reports/relatorio_comparativo_{candidatura.numero}_{_sufixo_arquivo_rel}.pdf"
         )
+        gerar_relatorio_comparativo_pdf(dados_relatorio, comparativo_pdf_path)
+        st.download_button("Tipo 3 (PDF)", comparativo_pdf_path.read_bytes(), file_name=comparativo_pdf_path.name)
     with col5:
-        comparativo_bytes = gerar_relatorio_comparativo_html(dados_relatorio).encode("utf-8")
-        st.download_button(
-            "Baixar relatorio comparativo", comparativo_bytes,
-            file_name=f"relatorio_comparativo_{candidatura.nome_urna}.html",
-        )
-    with col6:
         planilhas = {
             "Resumo": pd.DataFrame([vars(rg)]),
             "Ranking": ranking,
             "Territorio": indice_terr_rel,
             "Rivais_Similaridade": rivais_sim_rel,
             "Delta_Territorio": delta_rel,
+            "Desempenho_IDP_IVE_IEC_QEC": pd.DataFrame(linhas_desempenho_rivais_rel),
         }
         if bairros_agg_rel is not None:
             planilhas["Bairros"] = bairros_agg_rel
@@ -2934,22 +3028,4 @@ elif secao == "Relatorio":
             planilhas["Maslow_Sem_Proxy"] = resultado_maslow_rel.tiers_sem_proxy
         xlsx_path = resolve_path(f"outputs/reports/dados_{candidatura.numero}_{_sufixo_arquivo_rel}.xlsx")
         exportar_excel(xlsx_path, planilhas)
-        st.download_button("Baixar dados (Excel)", xlsx_path.read_bytes(), file_name=xlsx_path.name)
-
-    col7, col8 = st.columns(2)
-    with col7:
-        estrategia_pdf_path = resolve_path(
-            f"outputs/reports/relatorio_estrategia_{candidatura.numero}_{_sufixo_arquivo_rel}.pdf"
-        )
-        gerar_relatorio_estrategia_pdf(dados_relatorio, estrategia_pdf_path)
-        st.download_button(
-            "Baixar relatorio de estrategia (PDF)", estrategia_pdf_path.read_bytes(), file_name=estrategia_pdf_path.name,
-        )
-    with col8:
-        comparativo_pdf_path = resolve_path(
-            f"outputs/reports/relatorio_comparativo_{candidatura.numero}_{_sufixo_arquivo_rel}.pdf"
-        )
-        gerar_relatorio_comparativo_pdf(dados_relatorio, comparativo_pdf_path)
-        st.download_button(
-            "Baixar relatorio comparativo (PDF)", comparativo_pdf_path.read_bytes(), file_name=comparativo_pdf_path.name,
-        )
+        st.download_button("Excel (dados brutos)", xlsx_path.read_bytes(), file_name=xlsx_path.name)

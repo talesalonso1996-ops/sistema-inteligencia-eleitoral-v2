@@ -61,6 +61,15 @@ class DadosRelatorio:
     patrimonio_comparativo: pd.DataFrame | None = None  # saida de patrimonio_comparativo (src/candidate_assets.py)
     # Campo aditivo (Etapa 8, tipo 3 - src/reports/relatorio_comparativo.py).
     comparativo_historico: object | None = None  # ResultadoComparativoHistorico (src/candidate_history.py)
+    # Campos aditivos (melhorias pos-Etapa 8, tipo 4 -
+    # src/reports/relatorio_aprofundado.py). indices_desempenho_candidato e
+    # o dict {"IDP":.., "IVE":.., "IEC":.., "QEC":..} do candidato-alvo
+    # (IndicesDesempenhoReal.valores(), src/indicators/candidate_performance_indices.py);
+    # indices_desempenho_rivais e um DataFrame (colunas nome_urna, IDP, IVE,
+    # IEC, QEC) com o candidato-alvo + os rivais por similaridade de base
+    # eleitoral - mesmo dado ja usado no radar da secao "Concorrencia".
+    indices_desempenho_candidato: dict[str, float] | None = None
+    indices_desempenho_rivais: pd.DataFrame | None = None
 
 
 def _formatar_numero(valor) -> str:
