@@ -131,6 +131,7 @@ from src.questionnaire.candidate_questionnaire import (
 # Modulo Candidato) - DIFERENTE do resto do modulo: usa dado real do TSE da
 # disputa comparavel mais recente, nunca autoavaliacao. Ver
 # src/rivals/hypothetical_rivals.py e src/parties/party_compatibility.py.
+from src.godfather_analysis import analisar_padrinho_politico
 from src.parties.party_compatibility import avaliar_compatibilidade_partidaria
 from src.rivals.hypothetical_rivals import identificar_rivais_projetados
 
@@ -496,12 +497,58 @@ def _pagina_questionario_candidato() -> None:
         "neste formulario - nao sao medicao objetiva de dado eleitoral."
     )
     if resposta.identificacao.possui_padrinho_politico == SimNao.SIM:
-        st.info(
-            f"🤝 Padrinho politico declarado: **{resposta.identificacao.nome_padrinho_politico or '-- nome nao informado --'}**. "
-            "Leve em conta na estrategia e nos relatorios deste candidato: pode ser fonte real de apoio "
-            "(estrutura, base eleitoral emprestada, aval publico) mas tambem risco de associacao "
-            "(desgaste ou controversia do padrinho reflete no afilhado)."
+        st.markdown("### 🤝 Padrinho politico")
+        _explicacao(
+            "Duas camadas, nunca misturadas num unico numero: (1) cruzamento REAL com o registro "
+            "do TSE (2018/2022/2024, mesma UF) - quando o padrinho ja foi candidato, usa o "
+            "desempenho eleitoral real dele (IDP) como sinal de forca; (2) pesquisa manual "
+            "complementar - o sistema nunca chama uma busca automatica na internet."
         )
+        nome_padrinho_decl = resposta.identificacao.nome_padrinho_politico
+        if not nome_padrinho_decl:
+            st.info("Nome do padrinho nao informado - preencha o campo acima para cruzar com o TSE.")
+        else:
+            analise_padrinho = analisar_padrinho_politico(nome_padrinho_decl, resposta.identificacao.uf)
+            if analise_padrinho.encontrado_no_tse:
+                cp = analise_padrinho.candidatura_encontrada
+                st.success(
+                    f"Encontrado no TSE: **{cp.nome_urna}** ({cp.nome_completo}) - "
+                    f"{cp.cargo.title()}/{cp.uf} - eleicao {cp.ano_eleicao} - {cp.resultado_final}."
+                )
+                kpis_padrinho = st.columns(4)
+                _kpi(kpis_padrinho[0], "Cargo disputado", cp.cargo.title())
+                _kpi(kpis_padrinho[1], "Votos (disputa real)", f"{cp.total_votos:,}".replace(",", "."))
+                _kpi(kpis_padrinho[2], "Indice de Desempenho Politico (IDP)",
+                     f"{analise_padrinho.indice_forca_idp:.0f}/100")
+                _kpi(kpis_padrinho[3], "Classificacao", analise_padrinho.classificacao_forca.replace("_", " ").title())
+                st.caption(
+                    "IDP mede a forca eleitoral REAL do padrinho (colocacao, proximidade de ser "
+                    "eleito, forca no proprio partido) na disputa mais forte encontrada - nunca "
+                    "reputacao ou influencia informal, que nao sao dado eleitoral verificavel. "
+                    "Leve isso em conta na estrategia: um padrinho com IDP alto e fonte real de "
+                    "apoio comprovado (estrutura, base eleitoral, aval publico), mas tambem risco "
+                    "de associacao (desgaste ou controversia dele reflete no afilhado)."
+                )
+            else:
+                st.warning(
+                    f"'{nome_padrinho_decl}' nao foi encontrado no registro de candidatos do TSE "
+                    f"(2018/2022/2024) na UF {resposta.identificacao.uf} - pode ser alguem que nunca "
+                    "disputou eleicao (empresario, lideranca religiosa/comunitaria) ou o nome "
+                    "declarado nao bateu de forma inequivoca. Pesquise externamente (fora deste "
+                    "sistema) e, se quiser, resuma abaixo o que encontrar - o sistema nunca faz "
+                    "essa busca sozinho."
+                )
+                contexto_padrinho = st.text_area(
+                    "Contexto adicional sobre o padrinho (pesquisa manual, opcional)",
+                    key="q_contexto_padrinho",
+                    help="Cole aqui um resumo do que voce encontrar pesquisando externamente - "
+                         "trajetoria, cargo atual, area de atuacao. Isso NAO e verificado pelo "
+                         "sistema, e so um campo de anotacao para a estrategia.",
+                )
+                if contexto_padrinho.strip():
+                    st.caption("Anotado - leve isso em conta na estrategia deste candidato.")
+                for aviso in analise_padrinho.limitacoes:
+                    st.caption(aviso)
 
     r_prontidao = indices["prontidao_eleitoral"]
     r_competitividade = indices["competitividade_inicial"]
