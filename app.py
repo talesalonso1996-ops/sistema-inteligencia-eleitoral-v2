@@ -372,13 +372,18 @@ def _pagina_questionario_candidato() -> None:
 
         with st.expander("3. Base eleitoral"):
             numero_territorios = st.number_input(
-                "Numero de bairros/cidades onde tem presenca organizada", min_value=0, max_value=200, step=1,
+                "Numero de bairros/cidades onde tem presenca organizada (deixe em branco se nao souber)",
+                min_value=0, max_value=200, step=1, value=None,
                 key="q_num_territorios",
             )
             estrutura_bairros = _nivel("Estrutura nos bairros/cidades de presenca", "q_estrutura_bairros")
             apoiadores_mobilizaveis = _nivel("Apoiadores mobilizaveis", "q_apoiadores")
             capacidade_eventos = _nivel("Capacidade de realizar eventos", "q_eventos")
             relacionamento_liderancas = _nivel("Relacionamento com liderancas comunitarias", "q_rel_liderancas")
+            contexto_relacionamento_liderancas = st.text_input(
+                "Contexto sobre o relacionamento com liderancas (opcional)", key="q_rel_liderancas_contexto",
+                help="Texto livre complementar - nao entra em nenhum indice, so na narrativa da estrategia.",
+            )
             relacionamento_vereadores = _nivel("Relacionamento com vereadores", "q_rel_vereadores")
             relacionamento_prefeitos = _nivel("Relacionamento com prefeitos", "q_rel_prefeitos")
             relacionamento_deputados = _nivel("Relacionamento com deputados", "q_rel_deputados")
@@ -395,7 +400,10 @@ def _pagina_questionario_candidato() -> None:
             entrevistas = _nivel("Desempenho em entrevistas", "q_entrevistas")
             debates = _nivel("Desempenho em debates", "q_debates")
             resposta_criticas = _nivel("Resposta a criticas", "q_resp_criticas")
-            seguidores_redes = _nivel("Volume de seguidores nas redes sociais", "q_seguidores")
+            seguidores_redes = st.number_input(
+                "Numero total de seguidores nas redes sociais (some todas as redes, deixe em branco se nao souber)",
+                min_value=0, step=100, value=None, key="q_seguidores",
+            )
             engajamento = _nivel("Engajamento nas redes sociais", "q_engajamento")
             producao_conteudo = _nivel("Producao propria de conteudo", "q_conteudo")
             equipe_comunicacao = _nivel("Equipe de comunicacao", "q_equipe_com")
@@ -404,7 +412,10 @@ def _pagina_questionario_candidato() -> None:
         with st.expander("5. Recursos"):
             disponibilidade_tempo = _nivel("Disponibilidade de tempo", "q_disp_tempo")
             capacidade_investimento_legal = _nivel("Capacidade de investimento legal proprio", "q_investimento")
-            capacidade_arrecadacao = _nivel("Capacidade de arrecadacao de campanha", "q_arrecadacao")
+            capacidade_arrecadacao = st.number_input(
+                "Meta de arrecadacao de campanha em R$ (deixe em branco se nao souber)",
+                min_value=0.0, step=1000.0, value=None, key="q_arrecadacao", format="%.2f",
+            )
             equipe = _nivel("Equipe disponivel", "q_equipe")
             transporte = _nivel("Transporte", "q_transporte")
             locais_reuniao = _nivel("Locais para reuniao", "q_locais")
@@ -413,6 +424,12 @@ def _pagina_questionario_candidato() -> None:
 
         with st.expander("6. Posicionamento"):
             temas = st.text_input("Temas de maior identificacao (separados por virgula)", key="q_temas")
+            imagem_desejada = st.text_input(
+                "Imagem que deseja projetar (texto livre, opcional)", key="q_imagem_desejada",
+            )
+            estilo_lideranca = st.text_input(
+                "Estilo de lideranca (texto livre, opcional)", key="q_estilo_lideranca",
+            )
             resistencia_ataques = _nivel("Resistencia a ataques/criticas publicas", "q_resistencia")
             disciplina = _nivel("Disciplina (agenda, partido, mensagem)", "q_disciplina")
 
@@ -441,11 +458,12 @@ def _pagina_questionario_candidato() -> None:
             resultados_concretos=resultados_concretos,
         ),
         base_eleitoral=BaseEleitoral(
-            numero_territorios_presenca=int(numero_territorios) if numero_territorios else None,
+            numero_territorios_presenca=int(numero_territorios) if numero_territorios is not None else None,
             estrutura_bairros=estrutura_bairros,
             apoiadores_mobilizaveis=apoiadores_mobilizaveis,
             capacidade_eventos=capacidade_eventos,
             relacionamento_liderancas=relacionamento_liderancas,
+            contexto_relacionamento_liderancas=contexto_relacionamento_liderancas.strip() or None,
             relacionamento_vereadores=relacionamento_vereadores,
             relacionamento_prefeitos=relacionamento_prefeitos,
             relacionamento_deputados=relacionamento_deputados,
@@ -478,6 +496,8 @@ def _pagina_questionario_candidato() -> None:
         ),
         posicionamento=Posicionamento(
             temas_identificacao=[t.strip() for t in temas.split(",") if t.strip()],
+            imagem_desejada=imagem_desejada.strip() or None,
+            estilo_lideranca=estilo_lideranca.strip() or None,
             resistencia_ataques=resistencia_ataques,
             disciplina=disciplina,
         ),
@@ -588,6 +608,18 @@ def _pagina_questionario_candidato() -> None:
         st.caption(f"Evidencia: `{arquetipo.evidencias.get(arquetipo.arquetipo_principal)}`")
     else:
         st.markdown("Nenhum arquetipo com evidencia suficiente nas respostas informadas.")
+
+    _campos_contexto = [
+        ("Imagem que deseja projetar", resposta.posicionamento.imagem_desejada),
+        ("Estilo de lideranca", resposta.posicionamento.estilo_lideranca),
+        ("Contexto sobre relacionamento com liderancas", resposta.base_eleitoral.contexto_relacionamento_liderancas),
+    ]
+    _campos_contexto_preenchidos = [(rotulo, valor) for rotulo, valor in _campos_contexto if valor]
+    if _campos_contexto_preenchidos:
+        st.subheader("Contexto qualitativo declarado")
+        st.caption("Texto livre - nao entra em nenhum indice, so na narrativa da estrategia.")
+        for rotulo, valor in _campos_contexto_preenchidos:
+            st.markdown(f"**{rotulo}:** {valor}")
 
     st.divider()
     st.subheader("Rivais projetados e compatibilidade partidaria")

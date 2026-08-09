@@ -70,6 +70,60 @@ def test_indisciplina_e_inverso_de_disciplina():
     assert campos["indisciplina"] == 25.0
 
 
+def test_seguidores_redes_e_capacidade_arrecadacao_sao_numero_real():
+    """Item 2 das melhorias pos-Etapa 8: perguntas quantificaveis (volume
+    de seguidores, meta de arrecadacao) viram numero real em vez de faixa
+    categorica (Nenhuma/Baixa/.../Muito Alta) - mais precisas."""
+    resposta = RespostaQuestionario(
+        identificacao=_identificacao_ficticia(),
+        comunicacao=Comunicacao(seguidores_redes=50000),
+        recursos=Recursos(capacidade_arrecadacao=250000.0),
+    )
+    campos = resposta.campos_numericos()
+    # teto_referencia de seguidores_redes = 100_000 (config/weights.yaml) -> 50% do teto
+    assert campos["seguidores_redes"] == 50.0
+    # teto_referencia de capacidade_arrecadacao = 500_000 -> 50% do teto
+    assert campos["capacidade_arrecadacao"] == 50.0
+
+
+def test_seguidores_redes_zero_e_diferente_de_nao_respondido():
+    """0 seguidores e uma resposta real (nota 0), diferente de campo
+    nao respondido (None) - mesma disciplina ja aplicada ao resto do
+    questionario."""
+    resposta_zero = RespostaQuestionario(
+        identificacao=_identificacao_ficticia(), comunicacao=Comunicacao(seguidores_redes=0),
+    )
+    resposta_none = RespostaQuestionario(identificacao=_identificacao_ficticia())
+    assert resposta_zero.campos_numericos()["seguidores_redes"] == 0.0
+    assert resposta_none.campos_numericos()["seguidores_redes"] is None
+
+
+def test_campos_texto_livre_complementares_existem_e_sao_opcionais():
+    """Item 2: perguntas qualitativas ganham texto livre complementar -
+    imagem_desejada/estilo_lideranca (Posicionamento) e
+    contexto_relacionamento_liderancas (BaseEleitoral) sao opcionais,
+    nunca entram em campos_numericos()."""
+    from src.questionnaire.candidate_questionnaire import Posicionamento
+
+    resposta = RespostaQuestionario(
+        identificacao=_identificacao_ficticia(),
+        base_eleitoral=BaseEleitoral(
+            relacionamento_liderancas=NivelIntensidade.ALTA,
+            contexto_relacionamento_liderancas="Prefeito da cidade vizinha e aliado historico.",
+        ),
+        posicionamento=Posicionamento(imagem_desejada="Renovador", estilo_lideranca="Colaborativo"),
+    )
+    assert resposta.base_eleitoral.contexto_relacionamento_liderancas == "Prefeito da cidade vizinha e aliado historico."
+    assert resposta.posicionamento.imagem_desejada == "Renovador"
+    assert resposta.posicionamento.estilo_lideranca == "Colaborativo"
+    campos = resposta.campos_numericos()
+    assert "contexto_relacionamento_liderancas" not in campos
+    assert "imagem_desejada" not in campos
+    assert "estilo_lideranca" not in campos
+    # a faixa categorica continua alimentando o indice normalmente
+    assert campos["relacionamento_liderancas"] == 75.0
+
+
 def test_padrinho_politico_nao_alimenta_campos_numericos():
     """Mesmo tratamento de partido_sigla: fato declarado, nao autoavaliacao
     categorica - nunca deve aparecer em campos_numericos() nem afetar
@@ -128,7 +182,7 @@ def test_taxa_preenchimento_completa_alta():
             entrevistas=NivelIntensidade.MODERADA,
             debates=NivelIntensidade.MODERADA,
             resposta_criticas=NivelIntensidade.ALTA,
-            seguidores_redes=NivelIntensidade.BAIXA,
+            seguidores_redes=8000,
             engajamento=NivelIntensidade.BAIXA,
             producao_conteudo=NivelIntensidade.MODERADA,
             equipe_comunicacao=NivelIntensidade.BAIXA,
@@ -137,7 +191,7 @@ def test_taxa_preenchimento_completa_alta():
         recursos=Recursos(
             disponibilidade_tempo=NivelIntensidade.ALTA,
             capacidade_investimento_legal=NivelIntensidade.MODERADA,
-            capacidade_arrecadacao=NivelIntensidade.MODERADA,
+            capacidade_arrecadacao=50000.0,
             equipe=NivelIntensidade.MODERADA,
             transporte=NivelIntensidade.ALTA,
             locais_reuniao=NivelIntensidade.MODERADA,

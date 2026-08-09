@@ -53,7 +53,7 @@ def _resposta_alta() -> RespostaQuestionario:
             entrevistas=NivelIntensidade.ALTA,
             debates=NivelIntensidade.ALTA,
             resposta_criticas=NivelIntensidade.ALTA,
-            seguidores_redes=NivelIntensidade.ALTA,
+            seguidores_redes=75000,  # equivalente a NivelIntensidade.ALTA (75.0) - teto_referencia=100_000
             engajamento=NivelIntensidade.ALTA,
             producao_conteudo=NivelIntensidade.ALTA,
             equipe_comunicacao=NivelIntensidade.MODERADA,
@@ -62,7 +62,7 @@ def _resposta_alta() -> RespostaQuestionario:
         recursos=Recursos(
             disponibilidade_tempo=NivelIntensidade.ALTA,
             capacidade_investimento_legal=NivelIntensidade.ALTA,
-            capacidade_arrecadacao=NivelIntensidade.MODERADA,
+            capacidade_arrecadacao=250000.0,  # equivalente a NivelIntensidade.MODERADA (50.0) - teto_referencia=500_000
             equipe=NivelIntensidade.ALTA,
             transporte=NivelIntensidade.ALTA,
             locais_reuniao=NivelIntensidade.ALTA,
@@ -190,7 +190,7 @@ def test_potencial_crescimento_baixo_sem_estrutura():
     # crescimento deve ficar baixo (sem "motor" para crescer)
     resposta = RespostaQuestionario(
         identificacao=_identificacao(),
-        comunicacao=Comunicacao(conhecimento_espontaneo=NivelIntensidade.BAIXA, seguidores_redes=NivelIntensidade.BAIXA),
+        comunicacao=Comunicacao(conhecimento_espontaneo=NivelIntensidade.BAIXA, seguidores_redes=5000),
     )
     resultado = calcular_indices_candidato(resposta)
     assert resultado["potencial_crescimento"].valor == 0.0  # sem nenhum componente de estrutura respondido

@@ -55,10 +55,12 @@ def valor_normativo(nivel: NivelIntensidade | SimNao | None) -> float | None:
     return float(cfg["escala_categorica"][nivel.value])
 
 
-def valor_normalizado_numerico(campo: str, valor: int | None) -> float | None:
-    """Normaliza uma resposta numerica (hoje so `numero_territorios_presenca`)
-    usando o teto de referencia declarado em config/weights.yaml -
-    normalizacao linear, saturando em 100."""
+def valor_normalizado_numerico(campo: str, valor: int | float | None) -> float | None:
+    """Normaliza uma resposta numerica real (numero_territorios_presenca,
+    seguidores_redes, capacidade_arrecadacao) usando o teto de referencia
+    declarado em config/weights.yaml - normalizacao linear, saturando em
+    100. Mais preciso que faixa categorica (Nenhuma/Baixa/.../Muito Alta)
+    para perguntas que tem resposta numerica natural."""
     if valor is None:
         return None
     teto = weights_config()["normalizacao_numerica"][campo]["teto_referencia"]
@@ -121,6 +123,11 @@ class BaseEleitoral:
     apoiadores_mobilizaveis: NivelIntensidade | None = None
     capacidade_eventos: NivelIntensidade | None = None
     relacionamento_liderancas: NivelIntensidade | None = None
+    # Texto livre complementar (opcional) - a faixa acima continua
+    # alimentando o indice (precisa ser categorica pra ficar comparavel
+    # entre candidatos), este campo so entra na narrativa/estrategia,
+    # nunca em formula.
+    contexto_relacionamento_liderancas: str | None = None
     relacionamento_vereadores: NivelIntensidade | None = None
     relacionamento_prefeitos: NivelIntensidade | None = None
     relacionamento_deputados: NivelIntensidade | None = None
@@ -139,7 +146,7 @@ class Comunicacao:
     entrevistas: NivelIntensidade | None = None
     debates: NivelIntensidade | None = None
     resposta_criticas: NivelIntensidade | None = None
-    seguidores_redes: NivelIntensidade | None = None
+    seguidores_redes: int | None = None  # numero real, nao faixa (ver valor_normalizado_numerico)
     engajamento: NivelIntensidade | None = None
     producao_conteudo: NivelIntensidade | None = None
     equipe_comunicacao: NivelIntensidade | None = None
@@ -152,7 +159,7 @@ class Recursos:
 
     disponibilidade_tempo: NivelIntensidade | None = None
     capacidade_investimento_legal: NivelIntensidade | None = None
-    capacidade_arrecadacao: NivelIntensidade | None = None
+    capacidade_arrecadacao: float | None = None  # valor real em R$, nao faixa (ver valor_normalizado_numerico)
     equipe: NivelIntensidade | None = None
     transporte: NivelIntensidade | None = None
     locais_reuniao: NivelIntensidade | None = None
@@ -210,12 +217,17 @@ class RespostaQuestionario:
         out["numero_territorios_presenca"] = valor_normalizado_numerico(
             "numero_territorios_presenca", self.base_eleitoral.numero_territorios_presenca
         )
+        out["seguidores_redes"] = valor_normalizado_numerico(
+            "seguidores_redes", self.comunicacao.seguidores_redes
+        )
+        out["capacidade_arrecadacao"] = valor_normalizado_numerico(
+            "capacidade_arrecadacao", self.recursos.capacidade_arrecadacao
+        )
         out["mandato_anterior"] = valor_normativo(self.trajetoria.mandato_anterior)
         out["partido_definido"] = valor_normativo(self.identificacao.partido_definido)
 
         campos_categoricos_diretos = {
             "conhecimento_espontaneo": self.comunicacao.conhecimento_espontaneo,
-            "seguidores_redes": self.comunicacao.seguidores_redes,
             "estrutura_bairros": self.base_eleitoral.estrutura_bairros,
             "apoiadores_mobilizaveis": self.base_eleitoral.apoiadores_mobilizaveis,
             "capacidade_eventos": self.base_eleitoral.capacidade_eventos,
@@ -231,7 +243,6 @@ class RespostaQuestionario:
             "locais_reuniao": self.recursos.locais_reuniao,
             "audiovisual": self.recursos.audiovisual,
             "capacidade_investimento_legal": self.recursos.capacidade_investimento_legal,
-            "capacidade_arrecadacao": self.recursos.capacidade_arrecadacao,
             "oratoria": self.comunicacao.oratoria,
             "desempenho_videos": self.comunicacao.desempenho_videos,
             "entrevistas": self.comunicacao.entrevistas,

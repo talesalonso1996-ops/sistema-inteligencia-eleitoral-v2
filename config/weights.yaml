@@ -41,6 +41,10 @@ escala_binaria:
 normalizacao_numerica:
   numero_territorios_presenca:
     teto_referencia: 15   # numero de bairros/cidades a partir do qual a nota satura em 100
+  seguidores_redes:
+    teto_referencia: 100000   # 100 mil seguidores satura em 100 - referencia para candidato municipal/estadual (nao presidenciavel)
+  capacidade_arrecadacao:
+    teto_referencia: 500000   # R$500 mil satura em 100 - proximo do teto legal de campanha de Vereador/Prefeito em municipios medios
 
 indices_candidato:
   # cada indice "direto" lista os campos do questionario (ver
