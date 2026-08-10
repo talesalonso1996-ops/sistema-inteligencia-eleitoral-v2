@@ -45,6 +45,7 @@ from .candidate_finder import (
     votos_da_disputa,
     votos_da_disputa_generalizado,
 )
+from .electoral_metrics import desempenho_territorial
 from .indicators.candidate_performance_indices import calcular_indices_desempenho_real
 
 _ANOS_DISPONIVEIS = (2024, 2022, 2018)
@@ -66,6 +67,13 @@ LIMITACAO_ESCOPO_IDP = (
     "verificavel."
 )
 
+LIMITACAO_TOP_TERRITORIOS = (
+    "Territorios reais onde o padrinho teve seu MELHOR desempenho (maior participacao "
+    "sobre os votos validos do proprio territorio) na disputa encontrada - um sinal real "
+    "de 'base eleitoral emprestada', nao uma garantia de que o candidato-afilhado tera o "
+    "mesmo desempenho ali."
+)
+
 
 @dataclass
 class AnalisePadrinhoPolitico:
@@ -76,6 +84,11 @@ class AnalisePadrinhoPolitico:
     indice_forca_idp: float | None = None
     classificacao_forca: str | None = None
     anos_verificados: list[int] = field(default_factory=list)
+    # Top territorios REAIS do padrinho (colunas: nivel territorial usado -
+    # NR_ZONA se o padrinho foi candidato municipal, CD_MUNICIPIO se foi
+    # estadual/distrital -, votos_candidato, pct_votos_validos_territorio) -
+    # sinal real de "base eleitoral emprestada", nunca do candidato-afilhado.
+    top_territorios: pd.DataFrame | None = None
     limitacoes: list[str] = field(default_factory=list)
 
 
@@ -163,11 +176,20 @@ def analisar_padrinho_politico(nome_padrinho: str | None, uf: str) -> AnalisePad
     nivel = "NR_ZONA" if melhor.codigo_municipio_tse is not None else "CD_MUNICIPIO"
     indices = calcular_indices_desempenho_real(melhor, vc, vd, rd, nivel)
 
+    terr = desempenho_territorial(melhor, vc, vd, rd, nivel)
+    top_territorios = None
+    if not terr.empty:
+        colunas = [c for c in [nivel, "votos_candidato", "pct_votos_validos_territorio"] if c in terr.columns]
+        top_territorios = (
+            terr[colunas].sort_values("pct_votos_validos_territorio", ascending=False).head(5).reset_index(drop=True)
+        )
+
     return AnalisePadrinhoPolitico(
         nome_declarado=nome_padrinho.strip(), uf=uf.upper(), encontrado_no_tse=True,
         candidatura_encontrada=melhor,
         indice_forca_idp=indices.idp.valor,
         classificacao_forca=indices.idp.classificacao,
         anos_verificados=anos_verificados,
-        limitacoes=[LIMITACAO_MATCH_NOME, LIMITACAO_ESCOPO_IDP],
+        top_territorios=top_territorios,
+        limitacoes=[LIMITACAO_MATCH_NOME, LIMITACAO_ESCOPO_IDP, LIMITACAO_TOP_TERRITORIOS],
     )

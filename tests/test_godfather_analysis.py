@@ -34,6 +34,19 @@ def test_padrinho_nao_encontrado_degrada_graciosamente():
     assert LIMITACAO_MATCH_NOME in resultado.limitacoes
 
 
+def test_padrinho_real_encontrado_traz_top_territorios_reais():
+    """Sinal real de 'base eleitoral emprestada' - territorios REAIS onde o
+    padrinho teve melhor % de votos validos na disputa encontrada."""
+    resultado = analisar_padrinho_politico("TARCISIO GOMES DE FREITAS", "SP")
+    assert resultado.top_territorios is not None
+    assert not resultado.top_territorios.empty
+    assert len(resultado.top_territorios) <= 5
+    assert "pct_votos_validos_territorio" in resultado.top_territorios.columns
+    # ordenado do maior para o menor % de votos validos
+    valores = resultado.top_territorios["pct_votos_validos_territorio"].tolist()
+    assert valores == sorted(valores, reverse=True)
+
+
 def test_padrinho_com_homonimo_real_nunca_escolhe():
     """MARIA APARECIDA DA SILVA tem 15 combinacoes numero+cargo distintas
     so em SP/2024 (conferido manualmente) - precisa ficar como

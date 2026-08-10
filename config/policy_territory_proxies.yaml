@@ -1,0 +1,109 @@
+# Mapeamento REAL pauta -> variavel(is) do Censo IBGE 2022 usada(s) como
+# proxy territorial de oportunidade/relevancia (src/territory_recommendations.py,
+# melhorias pos-Etapa 8 - "Territorios e Pautas Sugeridas" do Modo 1).
+#
+# Mesmo principio ja aplicado em config/indicators.yaml:piramide_maslow: so
+# pautas com uma variavel do Censo REALMENTE disponivel e defensavel na
+# literatura ganham mapeamento aqui - as demais (a maioria das 35 pautas de
+# config/policy_areas.yaml) ficam SEM PROXY TERRITORIAL, documentado e
+# explicito, nunca inventado. As variaveis disponiveis sao as mesmas ja
+# calculadas por src/demographic_analysis.py:perfil_demografico_por_setor
+# (nenhuma fonte nova).
+#
+# Cada entrada tem:
+#   variaveis: lista de {nome, tipo, direcao}
+#     tipo: "necessidade" (deficit real = oportunidade de atuar na pauta) ou
+#           "relevancia_demografica" (peso populacional do publico-alvo da pauta)
+#     direcao: "menor_pior" (valor baixo = maior necessidade/oportunidade) ou
+#              "maior_relevante" (valor alto = publico-alvo mais presente ali)
+
+pautas:
+  saneamento:
+    variaveis:
+      - nome: pct_agua_encanada
+        tipo: necessidade
+        direcao: menor_pior
+      - nome: pct_esgoto_adequado
+        tipo: necessidade
+        direcao: menor_pior
+      - nome: pct_sem_banheiro
+        tipo: necessidade
+        direcao: maior_relevante  # % SEM banheiro - quanto maior, pior/mais necessidade
+      - nome: pct_esgoto_a_ceu_aberto
+        tipo: necessidade
+        direcao: maior_relevante  # quanto maior, pior/mais necessidade
+
+  infraestrutura:
+    variaveis:
+      - nome: pct_agua_encanada
+        tipo: necessidade
+        direcao: menor_pior
+      - nome: pct_esgoto_adequado
+        tipo: necessidade
+        direcao: menor_pior
+      - nome: pct_coleta_lixo
+        tipo: necessidade
+        direcao: menor_pior
+
+  educacao:
+    variaveis:
+      - nome: pct_alfabetizado_15mais
+        tipo: necessidade
+        direcao: menor_pior
+
+  emprego_renda:
+    variaveis:
+      - nome: renda_media_responsavel
+        tipo: necessidade
+        direcao: menor_pior
+
+  combate_pobreza:
+    variaveis:
+      - nome: renda_media_responsavel
+        tipo: necessidade
+        direcao: menor_pior
+
+  assistencia_social:
+    variaveis:
+      - nome: renda_media_responsavel
+        tipo: necessidade
+        direcao: menor_pior
+      - nome: pct_domicilios_chefia_feminina
+        tipo: relevancia_demografica
+        direcao: maior_relevante
+
+  mulheres:
+    variaveis:
+      - nome: pct_domicilios_chefia_feminina
+        tipo: relevancia_demografica
+        direcao: maior_relevante
+
+  idosos:
+    variaveis:
+      - nome: pct_populacao_60mais
+        tipo: relevancia_demografica
+        direcao: maior_relevante
+
+  juventude:
+    variaveis:
+      - nome: pct_populacao_15_24
+        tipo: relevancia_demografica
+        direcao: maior_relevante
+
+  moradia:
+    variaveis:
+      - nome: pct_agua_encanada
+        tipo: necessidade
+        direcao: menor_pior
+      - nome: pct_sem_banheiro
+        tipo: necessidade
+        direcao: maior_relevante
+
+  habitacao:
+    variaveis:
+      - nome: pct_agua_encanada
+        tipo: necessidade
+        direcao: menor_pior
+      - nome: pct_sem_banheiro
+        tipo: necessidade
+        direcao: maior_relevante

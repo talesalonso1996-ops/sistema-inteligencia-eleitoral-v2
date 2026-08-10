@@ -128,6 +128,12 @@ class BaseEleitoral:
     # entre candidatos), este campo so entra na narrativa/estrategia,
     # nunca em formula.
     contexto_relacionamento_liderancas: str | None = None
+    # Lista de bairros/regioes REAIS onde o candidato declara ja ter
+    # presenca, contato ou vinculo pessoal (mora, nasceu, trabalha) - dado
+    # declarado (nunca inferido/fabricado), usado pelo modulo de
+    # territorios sugeridos (src/territory_recommendations.py) como um dos
+    # 3 sinais reais para recomendar onde priorizar campanha.
+    bairros_presenca_declarados: list[str] = field(default_factory=list)
     relacionamento_vereadores: NivelIntensidade | None = None
     relacionamento_prefeitos: NivelIntensidade | None = None
     relacionamento_deputados: NivelIntensidade | None = None
@@ -180,6 +186,13 @@ class Posicionamento:
     disciplina: NivelIntensidade | None = None
     disposicao_negociacao: NivelIntensidade | None = None
     disposicao_confronto: NivelIntensidade | None = None
+    # IDs de pauta do catalogo REAL de 35 pautas (config/policy_areas.yaml,
+    # mesmo catalogo do Modo 3) - diferente de temas_identificacao (texto
+    # livre, so narrativa), este campo referencia pautas reais e estruturadas
+    # para permitir cruzamento automatico com dado real do Censo IBGE por
+    # territorio (src/territory_recommendations.py) - nunca inferido a
+    # partir do texto livre (evita match fuzzy/impreciso).
+    pautas_prioritarias: list[str] = field(default_factory=list)
 
 
 @dataclass

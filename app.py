@@ -141,6 +141,7 @@ from src.questionnaire.candidate_questionnaire import (
 # disputa comparavel mais recente, nunca autoavaliacao. Ver
 # src/rivals/hypothetical_rivals.py e src/parties/party_compatibility.py.
 from src.godfather_analysis import analisar_padrinho_politico
+from src.territory_recommendations import montar_territorios_sugeridos
 from src.parties.party_compatibility import avaliar_compatibilidade_partidaria
 from src.rivals.hypothetical_rivals import identificar_rivais_projetados
 
@@ -399,6 +400,12 @@ def _pagina_questionario_candidato() -> None:
             relacionamento_entidades = _nivel("Relacionamento com entidades/associacoes", "q_rel_entidades")
             liderancas_regionais = _nivel("Relacionamento com liderancas regionais", "q_liderancas_regionais")
             apoio_do_partido = _nivel("Apoio do partido a esta candidatura", "q_apoio_partido")
+            bairros_presenca = st.text_input(
+                "Bairros/regioes onde ja tem presenca, contato ou vinculo pessoal (separados por virgula)",
+                key="q_bairros_presenca",
+                help="Dado real declarado por voce - usado na secao 'Territorios e Pautas Sugeridas' abaixo, "
+                     "junto com o perfil censitario real do IBGE, para sugerir onde priorizar campanha.",
+            )
 
         with st.expander("4. Comunicacao"):
             conhecimento_espontaneo = _nivel(
@@ -441,6 +448,13 @@ def _pagina_questionario_candidato() -> None:
             )
             resistencia_ataques = _nivel("Resistencia a ataques/criticas publicas", "q_resistencia")
             disciplina = _nivel("Disciplina (agenda, partido, mensagem)", "q_disciplina")
+            pautas_prioritarias = st.multiselect(
+                "Pautas prioritarias (catalogo real, mesmo do Questionario de Pauta)",
+                list(_PAUTAS_LABELS.keys()), format_func=lambda k: _PAUTAS_LABELS[k], key="q_pautas_prioritarias",
+                help="Usado na secao 'Territorios e Pautas Sugeridas' abaixo para cruzar com o dado real do "
+                     "Censo IBGE por territorio - diferente de 'Temas de maior identificacao' acima (texto "
+                     "livre, so narrativa), aqui e uma pauta real e estruturada.",
+            )
 
         enviado = st.form_submit_button("Calcular indices", type="primary")
 
@@ -473,6 +487,7 @@ def _pagina_questionario_candidato() -> None:
             capacidade_eventos=capacidade_eventos,
             relacionamento_liderancas=relacionamento_liderancas,
             contexto_relacionamento_liderancas=contexto_relacionamento_liderancas.strip() or None,
+            bairros_presenca_declarados=[b.strip() for b in bairros_presenca.split(",") if b.strip()],
             relacionamento_vereadores=relacionamento_vereadores,
             relacionamento_prefeitos=relacionamento_prefeitos,
             relacionamento_deputados=relacionamento_deputados,
@@ -509,6 +524,7 @@ def _pagina_questionario_candidato() -> None:
             estilo_lideranca=estilo_lideranca.strip() or None,
             resistencia_ataques=resistencia_ataques,
             disciplina=disciplina,
+            pautas_prioritarias=pautas_prioritarias,
         ),
     )
 
@@ -525,6 +541,7 @@ def _pagina_questionario_candidato() -> None:
         "Aviso metodologico: os indices abaixo sao autoavaliacao categorica declarada "
         "neste formulario - nao sao medicao objetiva de dado eleitoral."
     )
+    analise_padrinho = None
     if resposta.identificacao.possui_padrinho_politico == SimNao.SIM:
         st.markdown("### 🤝 Padrinho politico")
         _explicacao(
@@ -629,6 +646,66 @@ def _pagina_questionario_candidato() -> None:
         st.caption("Texto livre - nao entra em nenhum indice, so na narrativa da estrategia.")
         for rotulo, valor in _campos_contexto_preenchidos:
             st.markdown(f"**{rotulo}:** {valor}")
+
+    if resposta.identificacao.municipio_base and resposta.identificacao.municipio_base != "-- nao informado --":
+        st.divider()
+        st.markdown("### 🗺️ Territorios e Pautas Sugeridas")
+        _explicacao(
+            "Onde priorizar campanha e quais pautas focar, combinando 3 sinais REAIS que nunca sao "
+            "misturados num unico numero: (1) perfil demografico real do Censo IBGE 2022 por "
+            "distrito do municipio-base, cruzado com as pautas prioritarias declaradas; (2) "
+            "territorios reais onde o padrinho politico teve melhor desempenho (se declarado e "
+            "encontrado no TSE); (3) bairros que voce mesmo declarou conhecer."
+        )
+        with st.spinner("Cruzando pautas prioritarias com o Censo IBGE 2022 por distrito..."):
+            resultado_territorios = montar_territorios_sugeridos(
+                resposta.identificacao.uf, resposta.identificacao.municipio_base,
+                resposta.posicionamento.pautas_prioritarias,
+                resposta.base_eleitoral.bairros_presenca_declarados,
+            )
+        for aviso in resultado_territorios.perfil.avisos:
+            st.warning(aviso)
+
+        if resultado_territorios.perfil.territorios.empty:
+            st.info("Perfil territorial indisponivel para este municipio - sugestoes abaixo ficam limitadas.")
+        else:
+            st.caption(
+                f"{resultado_territorios.perfil.municipio}/{resultado_territorios.perfil.uf} - "
+                f"{len(resultado_territorios.perfil.territorios)} distritos reais (Censo IBGE 2022)."
+            )
+            if not resultado_territorios.rankings_por_pauta:
+                st.info("Marque 'Pautas prioritarias' no formulario acima para ver territorios sugeridos por pauta.")
+            for ranking_pauta in resultado_territorios.rankings_por_pauta:
+                label_pauta = _PAUTAS_LABELS.get(ranking_pauta.pauta_id, ranking_pauta.pauta_id)
+                with st.container(border=True):
+                    st.markdown(f"**{label_pauta}**")
+                    if not ranking_pauta.tem_proxy_territorial or ranking_pauta.ranking is None:
+                        st.caption(ranking_pauta.aviso)
+                    else:
+                        top5 = ranking_pauta.ranking.head(5)
+                        st.dataframe(
+                            top5[["territorio", "score_oportunidade", "populacao_total"]],
+                            use_container_width=True, hide_index=True,
+                            column_config={
+                                "score_oportunidade": st.column_config.ProgressColumn(
+                                    "Oportunidade real (0-100)", min_value=0, max_value=100,
+                                ),
+                            },
+                        )
+
+        if analise_padrinho is not None and analise_padrinho.encontrado_no_tse and analise_padrinho.top_territorios is not None:
+            with st.container(border=True):
+                st.markdown(f"**Territorios reais do padrinho ({analise_padrinho.nome_declarado})**")
+                st.caption("Base eleitoral emprestada - onde o padrinho teve melhor desempenho real.")
+                st.dataframe(analise_padrinho.top_territorios, use_container_width=True, hide_index=True)
+
+        if resultado_territorios.bairros_declarados:
+            with st.container(border=True):
+                st.markdown("**Bairros que voce declarou conhecer**")
+                st.markdown(", ".join(resultado_territorios.bairros_declarados))
+
+        for limitacao in resultado_territorios.limitacoes:
+            st.caption(limitacao)
 
     st.divider()
     st.subheader("Rivais projetados e compatibilidade partidaria")
