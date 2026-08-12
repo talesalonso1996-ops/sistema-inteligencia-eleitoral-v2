@@ -110,7 +110,12 @@ from src.reports.relatorio_estrategia import (
     gerar_relatorio_estrategia_resumido_html,
 )
 from src.potential_index import calcular_indice_performance
-from src.regression_models import regressao_linear_votos, regressao_logistica_bom_desempenho
+from src.regression_models import (
+    classificacao_random_forest_bom_desempenho,
+    regressao_linear_votos,
+    regressao_logistica_bom_desempenho,
+    regressao_random_forest_votos,
+)
 from src.report_generator import DadosRelatorio, gerar_relatorio_html, gerar_relatorio_pdf
 from src.utils import indicators_config, resolve_path
 from src.vote_filtering import secao_composta, zona_uf_composta
@@ -703,6 +708,23 @@ def _pagina_questionario_candidato() -> None:
             with st.container(border=True):
                 st.markdown("**Bairros que voce declarou conhecer**")
                 st.markdown(", ".join(resultado_territorios.bairros_declarados))
+
+        for territorios_similares in resultado_territorios.territorios_similares_por_bairro:
+            with st.container(border=True):
+                st.markdown(f"**Territorios parecidos com '{territorios_similares.territorio_declarado}' (KNN)**")
+                if territorios_similares.similares is None:
+                    st.caption(territorios_similares.aviso)
+                else:
+                    _explicacao(
+                        f"K-Nearest Neighbors sobre o perfil real do Censo IBGE - os distritos mais "
+                        f"parecidos demograficamente com '{territorios_similares.territorio_correspondente}' "
+                        "(renda, escolaridade, saneamento, faixa etaria etc.) - sugestao real de "
+                        "expansao territorial baseada em perfil de eleitorado semelhante, nao em opiniao."
+                    )
+                    st.dataframe(
+                        territorios_similares.similares, use_container_width=True, hide_index=True,
+                        column_config={"distancia": st.column_config.NumberColumn("Distancia (menor = mais parecido)", format="%.3f")},
+                    )
 
         for limitacao in resultado_territorios.limitacoes:
             st.caption(limitacao)
@@ -2461,6 +2483,24 @@ elif secao == "Estatistica Avancada":
                     st.dataframe(reg.coeficientes, use_container_width=True)
                     st.caption(reg.limitacoes)
 
+            with st.container(border=True):
+                st.subheader("Random Forest (votos por territorio)")
+                _explicacao(
+                    "Complemento NAO-LINEAR a regressao linear acima, mesma pergunta - capta "
+                    "interacoes entre variaveis que a regressao linear nao capta (ex.: renda so "
+                    "importar em territorios com baixa escolaridade). R2 e OUT-OF-BAG (cada "
+                    "territorio avaliado so por arvores que nao o viram no treino - estimativa "
+                    "honesta sem precisar separar treino/teste)."
+                )
+                rf_reg, issues_rf_reg = regressao_random_forest_votos(base_territorio, "votos_candidato", variaveis_disp)
+                for issue in issues_rf_reg:
+                    st.warning(issue.mensagem)
+                if rf_reg:
+                    st.write(f"R2 (OOB) = {rf_reg.r_quadrado_oob}  |  n = {rf_reg.n_observacoes}  |  arvores = {rf_reg.n_arvores}")
+                    st.write("**Importancia das variaveis** (reducao media de impureza)")
+                    st.dataframe(rf_reg.importancia_variaveis, use_container_width=True)
+                    st.caption(rf_reg.limitacoes)
+
             modelo_log = None
             with st.container(border=True):
                 st.subheader("Regressao logistica: o que explica uma 'boa votacao'?")
@@ -2488,6 +2528,29 @@ elif secao == "Estatistica Avancada":
                     for texto in modelo_log.interpretacoes:
                         st.markdown(f"- {texto}")
                     st.caption(modelo_log.limitacoes)
+
+            with st.container(border=True):
+                st.subheader("Random Forest (classificacao 'boa votacao')")
+                _explicacao(
+                    "Complemento NAO-LINEAR a regressao logistica acima - MESMA definicao de "
+                    "'boa votacao' (mesmo limiar), pra comparar os dois modelos lado a lado. "
+                    "Acuracia e matriz de confusao vem de previsoes out-of-bag."
+                )
+                rf_clf, issues_rf_clf = classificacao_random_forest_bom_desempenho(
+                    base_territorio, "pct_votos_validos_territorio", variaveis_disp,
+                )
+                for issue in issues_rf_clf:
+                    st.warning(issue.mensagem)
+                if rf_clf:
+                    c1, c2, c3 = st.columns(3)
+                    _kpi(c1, "Limiar 'boa votacao'", f"{rf_clf.limiar_usado}%")
+                    _kpi(c2, "Acuracia (OOB)", f"{rf_clf.acuracia_oob*100:.0f}%")
+                    _kpi(c3, "Territorios (boa/fraca votacao)", f"{rf_clf.n_positivos}/{rf_clf.n_negativos}")
+                    st.write("**Matriz de confusao (OOB)** (linhas=real, colunas=previsto)")
+                    st.dataframe(rf_clf.matriz_confusao, use_container_width=True)
+                    st.write("**Importancia das variaveis**")
+                    st.dataframe(rf_clf.importancia_variaveis, use_container_width=True)
+                    st.caption(rf_clf.limitacoes)
 
             resultado_clustering = None
             with st.container(border=True):

@@ -1,7 +1,12 @@
 import pandas as pd
 from conftest import VARIAVEIS_DEMOGRAFICAS
 
-from src.regression_models import regressao_linear_votos, regressao_logistica_bom_desempenho
+from src.regression_models import (
+    classificacao_random_forest_bom_desempenho,
+    regressao_linear_votos,
+    regressao_logistica_bom_desempenho,
+    regressao_random_forest_votos,
+)
 
 
 def test_regressao_logistica_pseudo_r2_entre_0_e_1(base_territorio_sp):
@@ -194,6 +199,69 @@ def test_regressao_logistica_amostra_insuficiente_retorna_none():
         "renda_media_responsavel": [100, 200, 300],
     })
     modelo, issues = regressao_logistica_bom_desempenho(
+        df_pequeno, "pct_votos_validos_territorio", ["renda_media_responsavel"]
+    )
+    assert modelo is None
+    assert len(issues) > 0
+
+
+def test_random_forest_regressor_r2_oob_e_um_numero_valido(base_territorio_sp):
+    modelo, issues = regressao_random_forest_votos(base_territorio_sp, "votos_candidato", VARIAVEIS_DEMOGRAFICAS)
+    assert modelo is not None, f"modelo nao ajustado: {issues}"
+    assert -1.0 <= modelo.r_quadrado_oob <= 1.0
+    assert modelo.n_observacoes > 0
+    assert modelo.n_arvores == 300
+
+
+def test_random_forest_regressor_importancia_variaveis_soma_1(base_territorio_sp):
+    modelo, _ = regressao_random_forest_votos(base_territorio_sp, "votos_candidato", VARIAVEIS_DEMOGRAFICAS)
+    assert modelo is not None
+    # cada importancia e arredondada individualmente (4 casas) antes de
+    # somar - tolerancia cobre o erro de arredondamento acumulado (limitado
+    # por 0.00005 * numero de variaveis), nunca um desvio real do sklearn
+    # (que soma exatamente 1.0 antes do round).
+    assert abs(modelo.importancia_variaveis["importancia"].sum() - 1.0) < 1e-2
+    assert set(modelo.importancia_variaveis["variavel"]) <= set(modelo.variaveis_utilizadas)
+
+
+def test_random_forest_regressor_amostra_insuficiente_retorna_none():
+    df_pequeno = pd.DataFrame({
+        "votos_candidato": [1, 2, 3],
+        "renda_media_responsavel": [100, 200, 300],
+    })
+    modelo, issues = regressao_random_forest_votos(df_pequeno, "votos_candidato", ["renda_media_responsavel"])
+    assert modelo is None
+    assert len(issues) > 0
+
+
+def test_random_forest_classificador_mesma_definicao_de_boa_votacao_da_logistica(base_territorio_sp):
+    """RF classificador e regressao logistica precisam classificar o MESMO
+    numero de territorios como positivo/negativo - garante que os dois
+    modelos respondem exatamente a mesma pergunta, comparaveis lado a lado."""
+    log, _ = regressao_logistica_bom_desempenho(base_territorio_sp, "pct_votos_validos_territorio", VARIAVEIS_DEMOGRAFICAS)
+    rfc, issues = classificacao_random_forest_bom_desempenho(base_territorio_sp, "pct_votos_validos_territorio", VARIAVEIS_DEMOGRAFICAS)
+    assert rfc is not None, f"modelo nao ajustado: {issues}"
+    assert rfc.n_positivos == log.n_positivos
+    assert rfc.n_negativos == log.n_negativos
+    assert rfc.limiar_usado == log.limiar_usado
+
+
+def test_random_forest_classificador_acuracia_e_matriz_confusao_validas(base_territorio_sp):
+    modelo, issues = classificacao_random_forest_bom_desempenho(
+        base_territorio_sp, "pct_votos_validos_territorio", VARIAVEIS_DEMOGRAFICAS
+    )
+    assert modelo is not None, f"modelo nao ajustado: {issues}"
+    assert 0.0 <= modelo.acuracia_oob <= 1.0
+    assert modelo.matriz_confusao.values.sum() <= modelo.n_positivos + modelo.n_negativos
+    assert modelo.matriz_confusao.values.sum() > 0
+
+
+def test_random_forest_classificador_amostra_insuficiente_retorna_none():
+    df_pequeno = pd.DataFrame({
+        "pct_votos_validos_territorio": [1.0, 2.0, 3.0],
+        "renda_media_responsavel": [100, 200, 300],
+    })
+    modelo, issues = classificacao_random_forest_bom_desempenho(
         df_pequeno, "pct_votos_validos_territorio", ["renda_media_responsavel"]
     )
     assert modelo is None

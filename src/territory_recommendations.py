@@ -30,6 +30,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import pandas as pd
+from sklearn.neighbors import NearestNeighbors
+from sklearn.preprocessing import StandardScaler
 
 from .geographic_analysis import carregar_malha
 from .rivals.hypothetical_rivals import resolver_municipio
@@ -40,6 +42,20 @@ logger = get_logger(__name__)
 
 _ANO_REFERENCIA_MUNICIPIO = 2024
 _NIVEL_TERRITORIO = "NM_DIST"  # distrito - sempre presente na malha de setores, mesmo fallback ja usado no resto do app quando bairro nao tem poligono proprio
+
+# Variaveis reais do Censo usadas pelo KNN (perfil demografico geral do
+# territorio, nao especifico de 1 pauta) - mesma familia de variaveis ja
+# usada em src/clustering.py (K-Means), agora para uma busca de vizinhos
+# mais proximos em vez de agrupamento.
+_VARIAVEIS_SIMILARIDADE = [
+    "renda_media_responsavel", "pct_alfabetizado_15mais", "pct_agua_encanada",
+    "pct_esgoto_adequado", "pct_populacao_60mais", "pct_populacao_15_24",
+    "pct_domicilios_chefia_feminina", "pct_preta_parda",
+]
+
+
+def _normalizar_nome_territorio(nome: str) -> str:
+    return " ".join(nome.strip().upper().split())
 
 
 def proxies_config() -> dict:
@@ -190,10 +206,90 @@ def ranking_territorios_por_pauta(perfil: ResultadoPerfilPorTerritorio, pauta_id
 
 
 @dataclass
+class TerritoriosSimilares:
+    territorio_declarado: str  # nome como o candidato digitou
+    territorio_correspondente: str | None  # nome real do distrito que casou (None se nao achou)
+    similares: pd.DataFrame | None = None  # colunas: territorio, distancia (menor = mais parecido)
+    variaveis_usadas: list[str] = field(default_factory=list)
+    aviso: str | None = None
+
+
+def _casar_territorio_declarado(perfil: ResultadoPerfilPorTerritorio, nome_declarado: str) -> str | None:
+    """Casa o nome livre que o candidato digitou com um distrito REAL do
+    municipio - exato primeiro, depois substring (nos dois sentidos).
+    Nunca adivinha entre 2+ distritos igualmente compativeis (mesmo
+    principio conservador ja usado no cruzamento do padrinho politico:
+    melhor nao sugerir do que sugerir errado)."""
+    nome_norm = _normalizar_nome_territorio(nome_declarado)
+    territorios_reais = {t: _normalizar_nome_territorio(t) for t in perfil.territorios["territorio"]}
+
+    exatos = [t for t, norm in territorios_reais.items() if norm == nome_norm]
+    if len(exatos) == 1:
+        return exatos[0]
+
+    parciais = [t for t, norm in territorios_reais.items() if nome_norm in norm or norm in nome_norm]
+    if len(parciais) == 1:
+        return parciais[0]
+    return None
+
+
+def territorios_similares_a(perfil: ResultadoPerfilPorTerritorio, territorio_declarado: str, k: int = 5) -> TerritoriosSimilares:
+    """KNN (K-Nearest Neighbors, sklearn) sobre o perfil demografico REAL
+    (Censo IBGE) dos distritos do municipio-base: dado um territorio que o
+    candidato ja declara conhecer, encontra os K distritos REAIS mais
+    parecidos demograficamente (distancia euclidiana apos padronizar as
+    variaveis - StandardScaler, mesma tecnica ja usada em
+    src/clustering.py) - sugestao real de expansao territorial baseada em
+    similaridade de perfil de eleitorado, nunca em opiniao ou estimativa."""
+    territorio_real = _casar_territorio_declarado(perfil, territorio_declarado)
+    if territorio_real is None:
+        return TerritoriosSimilares(
+            territorio_declarado=territorio_declarado, territorio_correspondente=None,
+            aviso=f"'{territorio_declarado}' nao casou com nenhum distrito real do municipio de forma "
+                  "inequivoca - confira a grafia ou tente o nome do distrito oficial do IBGE.",
+        )
+
+    df = perfil.territorios
+    variaveis_disp = [v for v in _VARIAVEIS_SIMILARIDADE if v in df.columns]
+    dados = df.dropna(subset=variaveis_disp).reset_index(drop=True)
+    if territorio_real not in dados["territorio"].values:
+        return TerritoriosSimilares(
+            territorio_declarado=territorio_declarado, territorio_correspondente=territorio_real,
+            aviso=f"'{territorio_real}' nao tem dado censitario completo suficiente para calcular similaridade.",
+        )
+    if len(dados) < 3:
+        return TerritoriosSimilares(
+            territorio_declarado=territorio_declarado, territorio_correspondente=territorio_real,
+            aviso="Municipio tem poucos distritos com dado censitario completo para calcular similaridade.",
+        )
+
+    k_real = min(k + 1, len(dados))
+    scaler = StandardScaler()
+    x = scaler.fit_transform(dados[variaveis_disp])
+    modelo = NearestNeighbors(n_neighbors=k_real)
+    modelo.fit(x)
+
+    posicao_referencia = dados.index[dados["territorio"] == territorio_real][0]
+    distancias, indices = modelo.kneighbors(x[[posicao_referencia]])
+
+    linhas = [
+        {"territorio": dados.iloc[idx]["territorio"], "distancia": round(float(dist), 3)}
+        for dist, idx in zip(distancias[0], indices[0])
+        if dados.iloc[idx]["territorio"] != territorio_real
+    ]
+    similares_df = pd.DataFrame(linhas[:k])
+    return TerritoriosSimilares(
+        territorio_declarado=territorio_declarado, territorio_correspondente=territorio_real,
+        similares=similares_df, variaveis_usadas=variaveis_disp,
+    )
+
+
+@dataclass
 class ResultadoTerritoriosSugeridos:
     perfil: ResultadoPerfilPorTerritorio
     rankings_por_pauta: list[RankingPautaTerritorio] = field(default_factory=list)
     bairros_declarados: list[str] = field(default_factory=list)
+    territorios_similares_por_bairro: list[TerritoriosSimilares] = field(default_factory=list)
     limitacoes: list[str] = field(default_factory=list)
 
 
@@ -211,10 +307,13 @@ def montar_territorios_sugeridos(
 ) -> ResultadoTerritoriosSugeridos:
     """Ponto de entrada principal - perfil territorial real do
     municipio-base + ranking por cada pauta prioritaria declarada (quando
-    tiver proxy real disponivel)."""
+    tiver proxy real disponivel) + territorios similares (KNN) a cada
+    bairro que o candidato declarou conhecer."""
     perfil = perfil_por_territorio_municipio(uf, municipio_base)
     rankings = [ranking_territorios_por_pauta(perfil, pauta_id) for pauta_id in pautas_prioritarias]
+    similares = [territorios_similares_a(perfil, bairro) for bairro in bairros_declarados]
     return ResultadoTerritoriosSugeridos(
         perfil=perfil, rankings_por_pauta=rankings, bairros_declarados=list(bairros_declarados),
+        territorios_similares_por_bairro=similares,
         limitacoes=[_LIMITACAO_GERAL],
     )

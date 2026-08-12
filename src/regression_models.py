@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 
 from .data_validation import validar_amostra_minima
 from .utils import DataIssue, get_logger
@@ -236,6 +237,29 @@ class ResultadoRegressaoLogistica:
             )
 
 
+def _classificar_boa_votacao(
+    dados: pd.DataFrame, coluna_pct_votos: str, limiar: float | None, etapa: str,
+) -> tuple[pd.Series | None, float, int, int, list[DataIssue]]:
+    """Define o alvo binario 'boa votacao' (1) vs 'fraca' (0) - MESMA regra
+    para regressao logistica e para o classificador Random Forest, para que
+    os dois modelos respondam exatamente a mesma pergunta e sejam
+    comparaveis lado a lado. Default do limiar: mediana do proprio
+    candidato em `coluna_pct_votos` entre os territorios onde concorreu."""
+    limiar_usado = limiar if limiar is not None else float(dados[coluna_pct_votos].median())
+    alvo = (dados[coluna_pct_votos] >= limiar_usado).astype(int)
+    n_positivos, n_negativos = int(alvo.sum()), int((1 - alvo).sum())
+    if n_positivos < 3 or n_negativos < 3:
+        issue = DataIssue(
+            etapa=etapa, severidade="erro",
+            mensagem=(
+                f"Classes desbalanceadas demais para classificacao "
+                f"({n_positivos} positivos / {n_negativos} negativos com limiar {limiar_usado:.2f})."
+            ),
+        )
+        return None, limiar_usado, n_positivos, n_negativos, [issue]
+    return alvo, limiar_usado, n_positivos, n_negativos, []
+
+
 def regressao_logistica_bom_desempenho(
     df: pd.DataFrame,
     coluna_pct_votos: str,
@@ -275,19 +299,11 @@ def regressao_logistica_bom_desempenho(
     if issues or not variaveis_validas:
         return None, issues_cluster + issues_variancia + issues
 
-    limiar_usado = limiar if limiar is not None else float(dados[coluna_pct_votos].median())
-    alvo = (dados[coluna_pct_votos] >= limiar_usado).astype(int)
-    n_positivos, n_negativos = int(alvo.sum()), int((1 - alvo).sum())
-    if n_positivos < 3 or n_negativos < 3:
-        issue = DataIssue(
-            etapa="regressao_logistica_bom_desempenho",
-            severidade="erro",
-            mensagem=(
-                f"Classes desbalanceadas demais para regressao logistica "
-                f"({n_positivos} positivos / {n_negativos} negativos com limiar {limiar_usado:.2f})."
-            ),
-        )
-        return None, [issue]
+    alvo, limiar_usado, n_positivos, n_negativos, issues_classe = _classificar_boa_votacao(
+        dados, coluna_pct_votos, limiar, "regressao_logistica_bom_desempenho",
+    )
+    if alvo is None:
+        return None, issues_classe
 
     x = sm.add_constant(dados[variaveis_validas])
     try:
@@ -383,3 +399,183 @@ def regressao_logistica_bom_desempenho(
         colunas_cluster_utilizadas=colunas_cluster,
     )
     return resultado, issues_cluster + issues_variancia
+
+
+@dataclass
+class ResultadoRandomForest:
+    r_quadrado_oob: float
+    n_observacoes: int
+    n_arvores: int
+    importancia_variaveis: pd.DataFrame  # variavel, importancia (soma 1.0)
+    variaveis_utilizadas: list[str]
+    limitacoes: str = (
+        "Random Forest com dados agregados por territorio (ecological regression, mesma "
+        "limitacao da regressao linear/logistica): as relacoes encontradas valem para o "
+        "territorio, nao permitem inferir comportamento de eleitores individuais. R2 "
+        "reportado e OUT-OF-BAG (OOB) - cada arvore da floresta so ve uma amostra bootstrap "
+        "dos territorios; a previsao usada para calcular o R2 de cada territorio vem so das "
+        "arvores que NAO o viram no treino, dando uma estimativa honesta sem precisar separar "
+        "treino/teste (amostra pequena nao comporta esse split). Importancia de variavel mede "
+        "reducao media de impureza (MDI) - quais variaveis o modelo mais usou para dividir os "
+        "territorios, nao necessariamente causalidade."
+    )
+
+
+def regressao_random_forest_votos(
+    df: pd.DataFrame, coluna_alvo: str, variaveis: list[str],
+    n_arvores: int = 300, random_state: int = 42,
+) -> tuple[ResultadoRandomForest | None, list[DataIssue]]:
+    """Random Forest Regressor - alternativa NAO-LINEAR a regressao_linear_votos
+    para a MESMA pergunta (o que explica o percentual de voto por territorio?),
+    capaz de captar interacoes e nao-linearidades entre variaveis demograficas
+    que a regressao linear nao capta (ex.: renda so importa em territorios com
+    baixa escolaridade). Nao substitui a regressao linear (coeficientes
+    interpretaveis, testados) - e um COMPLEMENTO, mostrado lado a lado."""
+    variaveis_validas = [v for v in variaveis if v in df.columns]
+    colunas = [coluna_alvo] + variaveis_validas
+    dados = df[colunas].dropna(subset=[coluna_alvo] + variaveis_validas)
+
+    variaveis_validas, issues_variancia = _remover_variaveis_sem_variancia(
+        dados, variaveis_validas, "regressao_random_forest_votos"
+    )
+
+    minimo = _AMOSTRA_MINIMA_POR_VARIAVEL * max(len(variaveis_validas), 1)
+    issues = validar_amostra_minima(len(dados), minimo, "regressao_random_forest_votos")
+    if issues or not variaveis_validas:
+        return None, issues_variancia + issues
+
+    x = dados[variaveis_validas]
+    y = dados[coluna_alvo]
+    # min_samples_leaf escalado pela amostra - evita arvores super profundas
+    # (1 territorio por folha) em amostras pequenas, que so decorariam o
+    # ruido em vez de aprender um padrao real.
+    modelo = RandomForestRegressor(
+        n_estimators=n_arvores, oob_score=True, random_state=random_state,
+        min_samples_leaf=max(2, len(dados) // 50),
+    )
+    modelo.fit(x, y)
+
+    if not hasattr(modelo, "oob_score_"):
+        issue = DataIssue(
+            etapa="regressao_random_forest_votos", severidade="erro",
+            mensagem="Nao foi possivel calcular o R2 out-of-bag para esta amostra (provavel amostra pequena demais).",
+        )
+        return None, issues_variancia + [issue]
+
+    importancias = pd.DataFrame({
+        "variavel": variaveis_validas,
+        "importancia": modelo.feature_importances_.round(4),
+    }).sort_values("importancia", ascending=False).reset_index(drop=True)
+
+    resultado = ResultadoRandomForest(
+        r_quadrado_oob=round(float(modelo.oob_score_), 3),
+        n_observacoes=len(dados),
+        n_arvores=n_arvores,
+        importancia_variaveis=importancias,
+        variaveis_utilizadas=variaveis_validas,
+    )
+    return resultado, issues_variancia
+
+
+@dataclass
+class ResultadoRandomForestClassificacao:
+    limiar_usado: float
+    n_positivos: int
+    n_negativos: int
+    acuracia_oob: float
+    matriz_confusao: pd.DataFrame  # linhas=real, colunas=previsto (0/1), a partir de previsoes OOB
+    importancia_variaveis: pd.DataFrame
+    n_arvores: int
+    variaveis_utilizadas: list[str]
+    limitacoes: str = (
+        "Random Forest (classificacao) com dados agregados por territorio (ecological "
+        "regression, mesma limitacao da regressao logistica). MESMA definicao de 'boa "
+        "votacao' usada pela regressao logistica (mediana do proprio candidato), para "
+        "comparar os dois modelos lado a lado. Acuracia e matriz de confusao vem de "
+        "previsoes OUT-OF-BAG (cada territorio classificado so por arvores que nao o "
+        "viram no treino) - estimativa honesta sem precisar separar treino/teste, mesma "
+        "logica ja usada no R2 do Random Forest de regressao. Importancia de variavel mede "
+        "reducao media de impureza (MDI), nao causalidade."
+    )
+
+
+def classificacao_random_forest_bom_desempenho(
+    df: pd.DataFrame, coluna_pct_votos: str, variaveis: list[str],
+    limiar: float | None = None, n_arvores: int = 300, random_state: int = 42,
+) -> tuple[ResultadoRandomForestClassificacao | None, list[DataIssue]]:
+    """Random Forest Classifier - alternativa NAO-LINEAR a
+    regressao_logistica_bom_desempenho para a MESMA pergunta ('que
+    territorios tem boa votacao, e por que'), capaz de captar fronteiras de
+    decisao nao-lineares/interacoes entre variaveis que a regressao
+    logistica (linear no log-odds) nao capta. Complemento, nao substituto -
+    a logistica continua sendo a unica com coeficientes/odds ratio
+    interpretaveis e testados estatisticamente (p-valor)."""
+    variaveis_validas = [v for v in variaveis if v in df.columns]
+    colunas = [coluna_pct_votos] + variaveis_validas
+    dados = df[colunas].dropna(subset=[coluna_pct_votos] + variaveis_validas)
+
+    variaveis_validas, issues_variancia = _remover_variaveis_sem_variancia(
+        dados, variaveis_validas, "classificacao_random_forest_bom_desempenho"
+    )
+
+    minimo = _AMOSTRA_MINIMA_POR_VARIAVEL * max(len(variaveis_validas), 1)
+    issues = validar_amostra_minima(len(dados), minimo, "classificacao_random_forest_bom_desempenho")
+    if issues or not variaveis_validas:
+        return None, issues_variancia + issues
+
+    alvo, limiar_usado, n_positivos, n_negativos, issues_classe = _classificar_boa_votacao(
+        dados, coluna_pct_votos, limiar, "classificacao_random_forest_bom_desempenho",
+    )
+    if alvo is None:
+        return None, issues_variancia + issues_classe
+
+    x = dados[variaveis_validas]
+    modelo = RandomForestClassifier(
+        n_estimators=n_arvores, oob_score=True, random_state=random_state,
+        min_samples_leaf=max(2, len(dados) // 50),
+    )
+    modelo.fit(x, alvo)
+
+    if not hasattr(modelo, "oob_decision_function_"):
+        issue = DataIssue(
+            etapa="classificacao_random_forest_bom_desempenho", severidade="erro",
+            mensagem="Nao foi possivel calcular previsoes out-of-bag para esta amostra (provavel amostra pequena demais).",
+        )
+        return None, issues_variancia + [issue]
+
+    # oob_decision_function_ pode ter linhas NaN para as raras observacoes
+    # que calharam de entrar em TODAS as amostras bootstrap (nunca ficaram
+    # de fora de nenhuma arvore) - praticamente nao acontece com 300
+    # arvores, mas descartado da acuracia/matriz em vez de fabricar um
+    # valor quando acontece.
+    proba_oob = modelo.oob_decision_function_
+    validos = ~np.isnan(proba_oob[:, 1])
+    if validos.sum() < len(alvo):
+        logger.warning(
+            "classificacao_random_forest_bom_desempenho: %d territorio(s) sem previsao OOB, excluido(s) da acuracia.",
+            len(alvo) - int(validos.sum()),
+        )
+    previsto_oob = (proba_oob[validos, 1] >= 0.5).astype(int)
+    real_oob = alvo.to_numpy()[validos]
+
+    acuracia = round(float((previsto_oob == real_oob).mean()), 3)
+    matriz_confusao = pd.crosstab(
+        pd.Series(real_oob, name="real"), pd.Series(previsto_oob, name="previsto")
+    ).reindex(index=[0, 1], columns=[0, 1], fill_value=0)
+
+    importancias = pd.DataFrame({
+        "variavel": variaveis_validas,
+        "importancia": modelo.feature_importances_.round(4),
+    }).sort_values("importancia", ascending=False).reset_index(drop=True)
+
+    resultado = ResultadoRandomForestClassificacao(
+        limiar_usado=round(limiar_usado, 2),
+        n_positivos=n_positivos,
+        n_negativos=n_negativos,
+        acuracia_oob=acuracia,
+        matriz_confusao=matriz_confusao,
+        importancia_variaveis=importancias,
+        n_arvores=n_arvores,
+        variaveis_utilizadas=variaveis_validas,
+    )
+    return resultado, issues_variancia
