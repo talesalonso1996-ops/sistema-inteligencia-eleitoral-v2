@@ -75,3 +75,8 @@ def processar_ano(ano: int) -> None:
 if __name__ == "__main__":
     processar_ano(2022)
     processar_ano(2024)
+    # 2026: eleicao ainda nao ocorreu, mas bem_candidato ja e' preenchido no
+    # ato do registro de candidatura (mesmo prazo de consulta_cand) - ver
+    # config/data_sources.yaml: eleicoes.2026. Confirmado real via HEAD
+    # HTTP em 2026-08-11 (bem_candidato_2026.zip, 3.135.539 bytes).
+    processar_ano(2026)

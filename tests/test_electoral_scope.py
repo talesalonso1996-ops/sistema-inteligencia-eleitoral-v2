@@ -77,7 +77,7 @@ def test_cargo_inexistente_no_ano():
 
 def test_ano_nao_suportado():
     with pytest.raises(EscopoInvalidoError):
-        resolver_escopo(2026, "PREFEITO", uf="SP", municipio="SANTOS")
+        resolver_escopo(2030, "PREFEITO", uf="SP", municipio="SANTOS")
 
 
 def test_cargo_desconhecido():
@@ -114,3 +114,30 @@ def test_turno_invalido_levanta_erro():
 def test_sistema_eleitoral_por_cargo(cargo, ano, uf, municipio, esperado):
     escopo = resolver_escopo(ano, cargo, uf=uf, municipio=municipio)
     assert escopo.sistema_eleitoral == esperado
+
+
+@pytest.mark.parametrize(
+    "cargo", ["GOVERNADOR", "SENADOR", "DEPUTADO FEDERAL", "DEPUTADO ESTADUAL"],
+)
+def test_cargos_estaduais_2026_mesma_estrutura_de_2022(cargo):
+    """2026 (eleicao ainda nao ocorrida) usa a MESMA estrutura de
+    abrangencia de 2022 - verificado por inspecao real de
+    consulta_cand_2026_BRASIL.csv (ver config/data_sources.yaml)."""
+    escopo = resolver_escopo(2026, cargo, uf="SP")
+    assert escopo.tipo_abrangencia == "ESTADUAL"
+    assert escopo.filtro_sql_ds_eleicao == "%Eleições Gerais Estaduais 2026%"
+    assert escopo.filtro_sql_tp_abrangencia == "ESTADUAL"
+
+
+def test_presidente_2026_e_federal():
+    escopo = resolver_escopo(2026, "PRESIDENTE")
+    assert escopo.tipo_abrangencia == "NACIONAL"
+    assert escopo.filtro_sql_ds_eleicao == "%Eleição Geral Federal 2026%"
+    assert escopo.filtro_sql_tp_abrangencia == "FEDERAL"
+
+
+def test_prefeito_nao_existe_em_2026():
+    """2026 (Eleicoes Gerais) nao tem cargos municipais - so em anos de
+    Eleicoes Municipais (2024)."""
+    with pytest.raises(EscopoInvalidoError):
+        resolver_escopo(2026, "PREFEITO", uf="SP", municipio="SANTOS")

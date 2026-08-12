@@ -63,6 +63,7 @@ from src.demographic_analysis import (
     perfil_demografico_por_setor,
 )
 from src.candidate_assets import carregar_patrimonio_candidato, patrimonio_comparativo
+from src.candidate_social_media import carregar_redes_sociais_candidato
 from src.economic_analysis import carregar_perfil_economico_municipio
 from src.electorate_profile import (
     LIMITACAO_VINTAGE,
@@ -1355,8 +1356,14 @@ if _modo_app == "Matriz Integrada (Candidato x Territorio x Pauta)":
 
 st.sidebar.header("Selecione a disputa")
 
-_ANO_LABELS = {2024: "2024 - Eleicoes Municipais", 2022: "2022 - Eleicoes Gerais", 2018: "2018 - Eleicoes Gerais"}
-_ANOS_SEM_MUNICIPIO = (2022, 2018)  # anos ESTADUAIS/DISTRITAIS - sem seletor de municipio
+_ANO_LABELS = {
+    2026: "2026 - Eleicoes Gerais (candidaturas em registro)",
+    2024: "2024 - Eleicoes Municipais",
+    2022: "2022 - Eleicoes Gerais",
+    2018: "2018 - Eleicoes Gerais",
+}
+_ANOS_SEM_MUNICIPIO = (2026, 2022, 2018)  # anos ESTADUAIS/DISTRITAIS - sem seletor de municipio
+_ANOS_SEM_VOTACAO = (2026,)  # eleicao ainda nao ocorreu - so registro de candidaturas, sem analise de voto
 ano = st.sidebar.selectbox("Eleicao", list(_ANO_LABELS), format_func=lambda a: _ANO_LABELS[a], key="v2_ano")
 
 _ufs_ordenadas = sorted(UF_NOME.items(), key=lambda kv: kv[1])
@@ -1446,7 +1453,9 @@ if alvo is None:
         "(Censo Demografico 2022), Brasil inteiro. Eleicoes Municipais 2024 "
         "(Prefeito/Vereador). Eleicoes Gerais 2022 e 2018 (Governador, Senador, "
         "Deputado Federal e Estadual) - 2018 usa fonte alternativa de votacao "
-        "por secao (o CDN oficial do TSE bloqueia esse ano), ver Limitacoes."
+        "por secao (o CDN oficial do TSE bloqueia esse ano), ver Limitacoes. "
+        "Eleicoes Gerais 2026: eleicao ainda nao ocorreu (out/2026) - apenas "
+        "registro de candidaturas (em andamento no TSE), sem analise de voto."
     )
     st.info(
         "Selecione Eleicao -> UF -> [Municipio] -> Cargo -> Candidato na barra "
@@ -1490,6 +1499,71 @@ if st.sidebar.button("Gerar analise eleitoral", type="primary"):
 if not _ja_gerado_para_esta_selecao:
     st.title("Sistema de Inteligencia Eleitoral")
     st.info("Confira o resumo da selecao na barra lateral e clique em **Gerar analise eleitoral**.")
+    st.stop()
+
+if alvo.ano_eleicao in _ANOS_SEM_VOTACAO:
+    st.title("Ficha de registro de candidatura - 2026")
+    st.warning(
+        "A eleicao de 2026 ainda nao ocorreu (1o turno em outubro/2026) - nao existe "
+        "votacao por secao para analisar. Esta tela mostra APENAS o registro de "
+        "candidatura junto ao TSE (quem se candidatou, partido, coligacao/federacao, "
+        "cargo, UF). Nenhuma analise de voto, territorio, concorrencia ou desempenho "
+        "esta disponivel para 2026 nesta plataforma."
+    )
+    st.info(
+        "O registro de candidaturas de 2026 esta EM ANDAMENTO no TSE - os numeros "
+        "mudam conforme novas candidaturas sao protocoladas ate o fechamento do prazo "
+        "legal. Consulte novamente perto da eleicao para um retrato mais completo."
+    )
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("Candidato", alvo.nome_urna)
+        st.metric("Numero", alvo.numero)
+        st.metric("Partido", alvo.partido_sigla)
+    with col2:
+        st.metric("Cargo", alvo.cargo)
+        st.metric("UF", alvo.uf)
+        st.metric("Coligacao/Federacao", alvo.coligacao_federacao or "(candidatura isolada)")
+    st.markdown(
+        f"**Nome completo:** {alvo.nome_completo}\n\n"
+        f"**Situacao da candidatura (TSE):** registro em analise, ainda sem decisao "
+        f"final (codigo TSE: `{alvo.situacao_candidatura}`)\n\n"
+        f"**Resultado:** nao aplicavel - eleicao ainda nao ocorreu "
+        f"(codigo TSE: `{alvo.resultado_final}`)"
+    )
+
+    st.divider()
+    st.subheader("Patrimonio declarado (TSE)")
+    st.caption("Bens declarados pelo proprio candidato ao TSE no registro da candidatura - autodeclarado, nao e uma auditoria patrimonial.")
+    perfil_patrimonial = carregar_patrimonio_candidato(alvo)
+    if not perfil_patrimonial.disponivel:
+        st.info("Bens declarados indisponiveis para este candidato.")
+    else:
+        pp1, pp2 = st.columns(2)
+        pp1.metric("Valor total declarado", f"R$ {perfil_patrimonial.valor_total_bens:,.2f}")
+        pp2.metric("Itens declarados", str(perfil_patrimonial.n_itens_declarados))
+        if not perfil_patrimonial.top_bens.empty:
+            st.dataframe(
+                perfil_patrimonial.top_bens, use_container_width=True,
+                column_config={"valor": st.column_config.NumberColumn("Valor (R$)", format="R$ %.2f")},
+            )
+
+    st.subheader("Redes sociais declaradas (TSE)")
+    st.caption("Links declarados pelo proprio candidato ao TSE no registro da candidatura - nao verificados.")
+    perfil_redes = carregar_redes_sociais_candidato(alvo)
+    if not perfil_redes.disponivel:
+        st.info("Nenhuma rede social declarada por este candidato.")
+    else:
+        st.dataframe(perfil_redes.redes, use_container_width=True, hide_index=True)
+
+    if candidatura_b_selecionada is not None:
+        st.divider()
+        st.subheader("Candidato B (comparacao)")
+        st.markdown(
+            f"**{candidatura_b_selecionada.nome_urna}** ({candidatura_b_selecionada.numero}) - "
+            f"{candidatura_b_selecionada.partido_sigla} - "
+            f"{candidatura_b_selecionada.coligacao_federacao or '(candidatura isolada)'}"
+        )
     st.stop()
 
 with st.spinner(

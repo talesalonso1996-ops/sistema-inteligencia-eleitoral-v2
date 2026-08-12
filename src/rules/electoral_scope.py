@@ -162,6 +162,14 @@ _CARGO_SCOPE_TABLE: dict[str, _RegraCargo] = {
 }
 
 _CARGOS_POR_ANO: dict[int, tuple[str, ...]] = {
+    2026: (
+        # Mesmos cargos/abrangencia de 2022 (verificado em
+        # consulta_cand_2026_BRASIL.csv, 2026-08-11) - eleicao ainda nao
+        # ocorreu (1o turno em outubro/2026), ver
+        # config/data_sources.yaml: eleicoes.2026.eleicao_ainda_nao_ocorreu.
+        "PRESIDENTE", "GOVERNADOR", "SENADOR",
+        "DEPUTADO FEDERAL", "DEPUTADO ESTADUAL", "DEPUTADO DISTRITAL",
+    ),
     2024: ("PREFEITO", "VEREADOR"),
     2022: (
         "PRESIDENTE", "GOVERNADOR", "SENADOR",

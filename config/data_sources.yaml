@@ -32,6 +32,50 @@
 # via DuckDB em 2026-07-19 - ver GROUP BY DS_ELEICAO/TP_ABRANGENCIA/DS_CARGO)
 # - nenhum valor foi assumido sem essa conferencia (regra do projeto).
 eleicoes:
+  2026:
+    tipo: "Eleicoes Gerais"
+    turno_unico_padrao: false
+    # LIMITACAO REAL E ESTRUTURAL (nao um bug): o 1o turno de 2026 e em
+    # outubro/2026 - a eleicao AINDA NAO OCORREU. Nao existe (nem pode
+    # existir antes da eleicao) votacao_secao_2026 - por isso este ano NAO
+    # tem votacao_secao_url/votacao_secao_arquivo configurados de proposito.
+    # candidate_finder.buscar_candidatos_disputa() consulta esta flag para
+    # pular o filtro de vaga decidida e a tentativa de baixar votos - 2026
+    # cobre SOMENTE o registro de candidaturas (quem se candidatou,
+    # partido/federacao/coligacao, cargo, UF), nunca analise de voto/
+    # territorio/desempenho.
+    eleicao_ainda_nao_ocorreu: true
+    # Verificado por inspecao real de consulta_cand_2026_BRASIL.csv (DuckDB,
+    # GROUP BY DS_ELEICAO/TP_ABRANGENCIA/DS_CARGO, 2026-08-11) - mesma
+    # estrutura de 2022: FEDERAL para Presidente/Vice-Presidente, ESTADUAL
+    # para Governador/Vice-Governador/Senador/Suplentes/Dep. Federal/
+    # Estadual/Distrital.
+    ds_eleicao_ilike_por_abrangencia:
+      NACIONAL: "%Eleição Geral Federal 2026%"
+      ESTADUAL: "%Eleições Gerais Estaduais 2026%"
+      DISTRITAL: "%Eleições Gerais Estaduais 2026%"
+    tp_abrangencia_por_cargo:
+      NACIONAL: "FEDERAL"
+      ESTADUAL: "ESTADUAL"
+      DISTRITAL: "ESTADUAL"
+    consulta_cand_url: "https://cdn.tse.jus.br/estatistica/sead/odsele/consulta_cand/consulta_cand_2026.zip"
+    verificado: true
+    observacao: >
+      Registro de candidaturas de 2026 ainda EM ANDAMENTO na data desta
+      verificacao (prazo de registro nao fechado) - contagens baixas e
+      esperadas (ex.: so 5 candidatos a Presidente e 99 a Governador em
+      todo o Brasil na inspecao de 2026-08-11), NAO uma lista final; os
+      numeros crescem a cada nova consulta ao TSE, nunca tratar como dado
+      congelado. Todas as linhas trazem DS_SIT_TOT_TURNO='#NULO' e
+      DS_SITUACAO_CANDIDATURA='#NE' (sentinela de "ainda sem decisao" -
+      esperado e normal para uma eleicao futura, NAO o mesmo significado
+      que '#NULO' tem em anos ja decididos, onde marcaria candidatura
+      invalidada/indeferida). Colunas confirmadas identicas ao schema ja
+      usado por consulta_cand_2024/2022/2018 (NR_CANDIDATO, NM_CANDIDATO,
+      DS_CARGO, SG_UF, SG_PARTIDO, NM_COLIGACAO/NM_FEDERACAO, etc.) -
+      nenhuma mudanca de schema do TSE nesta rodada. Conversao para parquet
+      em scripts/preparar_consulta_cand_2026.py.
+
   2024:
     tipo: "Eleicoes Municipais"
     turno_unico_padrao: false
@@ -171,6 +215,12 @@ tse:
     url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/bem_candidato/bem_candidato_{ano}.zip"
     observacao: "So identifica o candidato por SQ_CANDIDATO (NAO tem NR_CANDIDATO) - por isso consulta_cand_{ano}_BR.parquet precisou ganhar a coluna SQ_CANDIDATO (ver scripts/adicionar_sq_candidato.py) para permitir a juncao. VR_BEM_CANDIDATO vem com virgula decimal brasileira, ja convertido para DOUBLE na conversao."
 
+  rede_social_candidato:
+    descricao: "Redes sociais declaradas por candidato no registro de candidatura (link/usuario, uma linha por rede) - Brasil inteiro. Um parquet nacional por ano (data/raw/rede_social_candidato_{ANO}_BR.parquet, gerado por scripts/preparar_rede_social_candidato.py) - so as colunas SQ_CANDIDATO/NR_ORDEM_REDE_SOCIAL/DS_URL."
+    fonte: "TSE - Redes sociais de candidatos (dadosabertos.tse.jus.br)"
+    url_padrao: "https://cdn.tse.jus.br/estatistica/sead/odsele/consulta_cand/rede_social_candidato_{ano}.zip"
+    observacao: "Mesmo padrao de bens_candidatos - identifica o candidato so por SQ_CANDIDATO, resolvido via src/candidate_assets._resolver_sq_candidato (reusado por src/candidate_social_media.py). DS_URL vem exatamente como o candidato declarou ao TSE (maiusculo, por vezes so um @usuario em vez de URL completa) - nunca normalizado. Confirmado disponivel para 2026 (eleicao ainda nao ocorrida) por inspecao real em 2026-08-11 - candidatos ja declaram redes sociais no proprio ato de registro de candidatura, antes da eleicao acontecer."
+
   perfil_eleitor_secao:
     descricao: "Perfil do eleitorado (genero/faixa etaria/grau de instrucao/cor-raca) por secao eleitoral. Baixado e convertido SOB DEMANDA por UF (ver src/uf_data_bootstrap.py) - nao ha arquivo_local fixo; o caminho e data/raw/perfil_eleitor_secao_{UF}.parquet (ja agregado por secao na conversao, o CSV original tem 1 linha por combinacao de genero x faixa etaria x instrucao x cor/raca x... - inviavel manter cru)."
     fonte: "TSE - Portal de Dados Abertos (dadosabertos.tse.jus.br, dataset 'Eleitorado Atual')"
@@ -294,3 +344,8 @@ pacote_cloud:
     - "domicilio2_setores_BR.parquet"
     - "bem_candidato_2022_BR.parquet"
     - "bem_candidato_2024_BR.parquet"
+    - "bem_candidato_2026_BR.parquet"
+    - "rede_social_candidato_2022_BR.parquet"
+    - "rede_social_candidato_2024_BR.parquet"
+    - "rede_social_candidato_2026_BR.parquet"
+    - "consulta_cand_2026_BR.parquet"

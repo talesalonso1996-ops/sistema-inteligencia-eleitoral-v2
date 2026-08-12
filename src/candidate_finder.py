@@ -415,14 +415,23 @@ def buscar_candidatos_disputa(
         turno=turno,
     )
 
+    eleicao_ainda_nao_ocorreu = bool(
+        data_sources().get("eleicoes", {}).get(ano_eleicao, {}).get("eleicao_ainda_nao_ocorreu")
+    )
+
     con = _conexao()
     filtros = [
         f"DS_CARGO ILIKE '{escopo.cargo}'",
         f"ANO_ELEICAO = {ano_eleicao}",
         f"NR_TURNO = {turno}",
-        "DS_SIT_TOT_TURNO != '#NULO'",
         f"DS_ELEICAO ILIKE '{escopo.filtro_sql_ds_eleicao}'",
     ]
+    if not eleicao_ainda_nao_ocorreu:
+        # DS_SIT_TOT_TURNO='#NULO' marca candidatura invalidada/indeferida
+        # numa eleicao JA DECIDIDA - mas para uma eleicao ainda nao
+        # ocorrida (ver flag acima) TODA candidatura registrada tem esse
+        # mesmo valor (ainda sem decisao), entao o filtro nao se aplica.
+        filtros.append("DS_SIT_TOT_TURNO != '#NULO'")
     if escopo.filtro_sql_tp_abrangencia:
         filtros.append(f"TP_ABRANGENCIA = '{escopo.filtro_sql_tp_abrangencia}'")
     if escopo.tipo_abrangencia == "MUNICIPAL":
@@ -461,7 +470,13 @@ def buscar_candidatos_disputa(
     if registro.empty:
         return []
 
-    ok = garantir_dados_uf(uf, ano_eleicao)
+    if eleicao_ainda_nao_ocorreu:
+        # Eleicao futura - nao ha (nem pode haver) votacao_secao ainda, o
+        # config deste ano nem define essa URL. Nunca tenta baixar/ler
+        # votos - so o registro de candidaturas e retornado.
+        ok = False
+    else:
+        ok = garantir_dados_uf(uf, ano_eleicao)
     if not ok:
         logger.warning("Dados de votacao_secao indisponiveis para UF=%s ano=%s", uf, ano_eleicao)
         registro["total_votos"] = 0
