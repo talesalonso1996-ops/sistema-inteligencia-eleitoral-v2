@@ -171,6 +171,14 @@ class Recursos:
     locais_reuniao: NivelIntensidade | None = None
     audiovisual: NivelIntensidade | None = None
     disponibilidade_viagens: NivelIntensidade | None = None
+    # Patrimonio pessoal ATUAL declarado (R$, valor real, nao faixa) -
+    # DIFERENTE de capacidade_arrecadacao (meta de arrecadacao de CAMPANHA).
+    # Nao entra em nenhum indice/formula (evitaria misturar autoavaliacao
+    # com dado real no mesmo numero) - so alimenta uma comparacao direta
+    # contra o patrimonio REAL declarado ao TSE pelos rivais projetados
+    # (src/candidate_assets.py:carregar_patrimonio_candidato, ja resolvido
+    # como Candidatura real em src/rivals/hypothetical_rivals.py).
+    patrimonio_pessoal_declarado: float | None = None
 
 
 @dataclass

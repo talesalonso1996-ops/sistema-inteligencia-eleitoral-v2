@@ -149,6 +149,37 @@ Rodar so os testes novos:
 .venv\Scripts\python -m pytest tests/test_candidate_questionnaire.py tests/test_candidate_indices.py tests/test_candidate_archetype.py -v
 ```
 
+## Host dedicado: Questionario Completo de Novos Candidatos
+
+Segundo ponto de entrada do MESMO repositorio (nao e um projeto separado -
+reaproveita `src/` inteiro, mesmo `requirements.txt`, mesmo `config/`).
+Pagina unica, formulario completo (8 secoes: as 7 do Modulo Candidato acima
++ Objetivos), com ponte opcional para o questionario completo de pauta por
+cada pauta prioritaria marcada, comparativo de patrimonio pessoal contra os
+rivais projetados (dado real do TSE) e aviso explicito sobre a assimetria
+entre o IDP real dos rivais e a autoavaliacao do candidato hipotetico.
+
+```powershell
+.venv\Scripts\python -m streamlit run app_candidatos.py --server.port 8541
+```
+
+**Persistencia**: cada envio grava um JSON em
+`data/candidatos/respostas/{id_analise}.json` (`src/questionnaire/persistence.py`)
+- ao contrario do resto de `data/`, esta pasta NAO esta no `.gitignore` de
+proposito. Quando rodando local, isso ja e suficiente pro app grande
+(`app.py`, opcao de menu "Candidatos analisados") enxergar na hora. Quando
+publicado no Streamlit Community Cloud (disco efemero, nao sobrevive a
+redeploy), a mesma resposta tambem e commitada direto no GitHub via API
+REST (secret `GITHUB_TOKEN` em Settings -> Secrets do app na nuvem) - o
+SIET local so precisa de um `git pull` pra ver os candidatos preenchidos na
+versao publica.
+
+**Deploy no Streamlit Community Cloud**: criar um 2o app apontando pro
+MESMO repositorio (`talesalonso1996-ops/sistema-inteligencia-eleitoral-v2`),
+branch `master`, "Main file path" = `app_candidatos.py` - nao duplica
+`requirements.txt` nem dado de cache, e o token do GitHub so precisa de
+permissao `contents:write` neste repositorio especifico.
+
 ## Modulo de Pautas/Plataforma (expansao em andamento)
 
 Segunda fatia da expansao (Modo 3 do briefing): questionario de pauta de

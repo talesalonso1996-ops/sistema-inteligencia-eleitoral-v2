@@ -142,6 +142,25 @@ def test_padrinho_politico_default_none():
     assert resposta.identificacao.nome_padrinho_politico is None
 
 
+def test_patrimonio_pessoal_declarado_nao_alimenta_campos_numericos():
+    """Campo novo (Recursos.patrimonio_pessoal_declarado) - so alimenta a
+    comparacao direta contra o patrimonio real dos rivais projetados
+    (app_candidatos.py), nunca entra em formula de indice - mesma logica
+    de partido_sigla/nome_padrinho_politico (fato declarado, nao
+    autoavaliacao categorica)."""
+    resposta = RespostaQuestionario(
+        identificacao=_identificacao_ficticia(),
+        recursos=Recursos(patrimonio_pessoal_declarado=350000.0),
+    )
+    assert resposta.recursos.patrimonio_pessoal_declarado == 350000.0
+    assert "patrimonio_pessoal_declarado" not in resposta.campos_numericos()
+
+
+def test_patrimonio_pessoal_declarado_default_none():
+    resposta = RespostaQuestionario(identificacao=_identificacao_ficticia())
+    assert resposta.recursos.patrimonio_pessoal_declarado is None
+
+
 def test_taxa_preenchimento_parcial():
     resposta = RespostaQuestionario(
         identificacao=_identificacao_ficticia(),

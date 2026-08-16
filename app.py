@@ -141,6 +141,7 @@ from src.questionnaire.candidate_questionnaire import (
     SimNao,
     Trajetoria,
 )
+from src.questionnaire.persistence import carregar_resposta_bruta, listar_respostas_salvas
 
 # Rivais projetados + compatibilidade partidaria (secoes 17/22, dentro do
 # Modulo Candidato) - DIFERENTE do resto do modulo: usa dado real do TSE da
@@ -198,142 +199,27 @@ VARIAVEIS_DEMOGRAFICAS = indicators_config()["clustering"]["variaveis_demografic
 K_CLUSTERS = indicators_config()["clustering"]["k_fixo"]
 
 # --------------------------------------------------------------------- CSS
-st.markdown(
-    """
-<style>
-.candidato-header {
-    background: linear-gradient(135deg, #161b22 0%, #1c2530 100%);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 14px;
-    padding: 20px 24px;
-    margin-bottom: 18px;
-}
-.candidato-header h1 { font-size: 1.5rem; margin: 0 0 6px 0; color: #e6e6e6; }
-.candidato-header .subtitulo { color: #8a92a3; font-size: 0.95rem; margin-bottom: 8px; }
-.kpi-tile {
-    background: #161b22;
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 12px;
-    padding: 14px 18px;
-    margin-bottom: 10px;
-    height: 100%;
-}
-.kpi-tile .kpi-label { font-size: 0.75rem; color: #8a92a3; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 4px; }
-.kpi-tile .kpi-value { font-size: 1.7rem; font-weight: 700; color: #e6e6e6; line-height: 1.15; }
-.kpi-tile .kpi-delta { font-size: 0.82rem; margin-top: 4px; }
-.badge { display: inline-block; padding: 3px 12px; border-radius: 999px; font-size: 0.75rem; font-weight: 700;
-         text-transform: uppercase; letter-spacing: 0.02em; }
-.secao-explicacao {
-    background: #10151c; border-left: 3px solid #2a78d6; border-radius: 6px;
-    padding: 10px 16px; margin-bottom: 16px; color: #c3c9d2; font-size: 0.9rem;
-}
-.cluster-card {
-    background: #161b22; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;
-    padding: 12px 16px; margin-bottom: 10px;
-}
-.cluster-card .titulo { font-weight: 700; color: #e6e6e6; margin-bottom: 4px; }
-</style>
-""",
-    unsafe_allow_html=True,
+# Widgets/estilo compartilhados com app_candidatos.py - ver src/ui_helpers.py
+# (extraido para os dois hosts nunca divergirem em aparencia).
+from src.ui_helpers import (
+    _CARGOS_MODO1,
+    _OPCOES_NIVEL,
+    _OPCOES_SIMNAO,
+    _ROTULOS_INDICE_INVERTIDO,
+    _badge,
+    _explicacao,
+    _fmt,
+    _kpi,
+    _nivel,
+    _rotulo_classificacao,
+    _simnao,
+    _tom_indice,
+    _tom_resultado,
+    _tom_rotulo_acao,
+    render_css,
 )
 
-_CORES_TOM = {"bom": ("rgba(12,163,12,0.18)", "#3ddc3d"), "neutro": ("rgba(237,161,0,0.18)", "#f5c451"),
-              "ruim": ("rgba(208,59,59,0.18)", "#f27272")}
-
-
-def _badge(texto: str, tom: str) -> str:
-    bg, fg = _CORES_TOM.get(tom, _CORES_TOM["neutro"])
-    return f'<span class="badge" style="background:{bg};color:{fg};">{texto}</span>'
-
-
-def _tom_resultado(resultado_final: str) -> str:
-    r = resultado_final.upper()
-    if r.startswith("ELEITO"):
-        return "bom"
-    if "SUPLENTE" in r:
-        return "neutro"
-    return "ruim"
-
-
-def _tom_rotulo_acao(rotulo: str) -> str:
-    return {"Fortaleza": "bom", "Consolidar": "neutro", "Alto potencial": "neutro",
-            "Baixa prioridade": "ruim"}.get(rotulo, "neutro")
-
-
-def _kpi(col, rotulo: str, valor: str, delta: str | None = None, tom: str = "neutro") -> None:
-    cor = _CORES_TOM.get(tom, _CORES_TOM["neutro"])[1]
-    delta_html = f'<div class="kpi-delta" style="color:{cor}">{delta}</div>' if delta else ""
-    col.markdown(
-        f'<div class="kpi-tile"><div class="kpi-label">{rotulo}</div>'
-        f'<div class="kpi-value">{valor}</div>{delta_html}</div>',
-        unsafe_allow_html=True,
-    )
-
-
-def _explicacao(texto: str) -> None:
-    st.markdown(f'<div class="secao-explicacao">{texto}</div>', unsafe_allow_html=True)
-
-
-def _fmt(v) -> str:
-    if v is None or (isinstance(v, float) and pd.isna(v)):
-        return "n/d"
-    return f"{v:,.0f}".replace(",", ".")
-
-
-# --------------------------------------------------------- Modulo Candidato
-_CARGOS_MODO1 = [
-    "Vereador", "Prefeito", "Deputado Estadual", "Deputado Distrital",
-    "Deputado Federal", "Senador", "Governador", "Presidente",
-]
-_OPCOES_NIVEL = {
-    "-- nao respondido --": None,
-    "Nenhuma": NivelIntensidade.NENHUMA,
-    "Baixa": NivelIntensidade.BAIXA,
-    "Moderada": NivelIntensidade.MODERADA,
-    "Alta": NivelIntensidade.ALTA,
-    "Muito alta": NivelIntensidade.MUITO_ALTA,
-}
-_OPCOES_SIMNAO = {"-- nao respondido --": None, "Sim": SimNao.SIM, "Nao": SimNao.NAO}
-
-
-def _nivel(label: str, key: str):
-    return _OPCOES_NIVEL[st.selectbox(label, list(_OPCOES_NIVEL.keys()), key=key)]
-
-
-def _simnao(label: str, key: str):
-    return _OPCOES_SIMNAO[st.selectbox(label, list(_OPCOES_SIMNAO.keys()), key=key)]
-
-
-def _tom_indice(valor: float, pior_quando_alto: bool) -> str:
-    v = 100 - valor if pior_quando_alto else valor
-    if v >= 60:
-        return "bom"
-    if v >= 40:
-        return "neutro"
-    return "ruim"
-
-
-# `classificacao` (critico/baixo/moderado/alto/muito_alto) e sempre a faixa
-# de MAGNITUDE bruta (mesma tabela de limites de config/weights.yaml para
-# todo indice, ver src/indicators/candidate_indices.py) - correto para
-# testes e para os 18 indices normais, mas enganoso na tela para os 2
-# indices "pior_quando_alto" (risco_reputacional, rejeicao_potencial):
-# nota 0 nesses dois e a MELHOR situacao possivel, mas apareceria rotulada
-# "critico" se mostrada sem traducao. Este dict so existe para exibicao -
-# nao altera o dado armazenado em ResultadoIndice.classificacao.
-_ROTULOS_INDICE_INVERTIDO = {
-    "critico": "risco minimo",
-    "baixo": "risco baixo",
-    "moderado": "risco moderado",
-    "alto": "risco alto",
-    "muito_alto": "risco critico",
-}
-
-
-def _rotulo_classificacao(r) -> str:
-    if r.pior_quando_alto:
-        return _ROTULOS_INDICE_INVERTIDO.get(r.classificacao, r.classificacao)
-    return r.classificacao
+render_css()
 
 
 def _pagina_questionario_candidato() -> None:
@@ -1103,6 +989,45 @@ def _pagina_matriz_integrada() -> None:
         st.caption(f"Cobertura do indice de compatibilidade: {c.cobertura_pct}%")
 
 
+# --------------------------------------------------- Candidatos analisados
+def _pagina_candidatos_analisados() -> None:
+    """Lista as respostas do questionario completo de novos candidatos
+    salvas em data/candidatos/respostas/ (preenchidas no host dedicado
+    `app_candidatos.py`, local ou publico - as do publico chegam aqui via
+    commit automatico no GitHub + `git pull` local, ver
+    src/questionnaire/persistence.py)."""
+    st.title("Candidatos Analisados")
+    _explicacao(
+        "Respostas do 'Questionario Completo de Novos Candidatos' (host separado, "
+        "`app_candidatos.py`) ja salvas neste ambiente. Se voce preencheu no host PUBLICO, "
+        "rode `git pull` neste projeto para elas aparecerem aqui."
+    )
+    resumos = listar_respostas_salvas()
+    if not resumos:
+        st.info("Nenhum candidato salvo ainda neste ambiente.")
+        return
+
+    st.dataframe(
+        pd.DataFrame([
+            {
+                "Cargo pretendido": r["cargo_pretendido"], "UF": r["uf"], "Municipio-base": r["municipio_base"],
+                "Pautas detalhadas": r["n_pautas_detalhadas"], "Salvo em": r["timestamp"], "ID": r["id_analise"],
+            }
+            for r in resumos
+        ]),
+        use_container_width=True, hide_index=True,
+    )
+
+    rotulos = {
+        f"{r['cargo_pretendido']}/{r['uf']} - {r['municipio_base']} ({r['timestamp'][:16]})": r["arquivo"]
+        for r in resumos
+    }
+    escolhido = st.selectbox("Ver detalhe de um candidato", list(rotulos.keys()), key="ca_escolhido")
+    if escolhido:
+        bruto = carregar_resposta_bruta(rotulos[escolhido])
+        st.json(bruto, expanded=False)
+
+
 @st.cache_data(show_spinner=False)
 def _buscar(numero: int) -> list[Candidatura]:
     return buscar_candidaturas(numero)
@@ -1337,6 +1262,7 @@ _modo_app = st.sidebar.radio(
         "Questionario de candidato (nova candidatura)",
         "Questionario de pauta/plataforma",
         "Matriz Integrada (Candidato x Territorio x Pauta)",
+        "Candidatos analisados (questionario completo)",
     ],
     key="v2_modo_app",
 )
@@ -1352,6 +1278,10 @@ if _modo_app == "Questionario de pauta/plataforma":
 
 if _modo_app == "Matriz Integrada (Candidato x Territorio x Pauta)":
     _pagina_matriz_integrada()
+    st.stop()
+
+if _modo_app == "Candidatos analisados (questionario completo)":
+    _pagina_candidatos_analisados()
     st.stop()
 
 st.sidebar.header("Selecione a disputa")

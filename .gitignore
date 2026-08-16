@@ -10,6 +10,12 @@ data/geographic/
 data/processed/
 data/cloud_bundle/
 
+# NAO adicionar uma regra generica "data/" aqui - data/candidatos/ (respostas
+# do questionario de novos candidatos, ver src/questionnaire/persistence.py)
+# precisa ficar versionada de proposito: e o mecanismo de sincronizacao entre
+# o host publico (app_candidatos.py, disco efemero no Streamlit Cloud) e o
+# SIET local (app.py, le via `git pull`).
+
 # Saidas geradas (relatorios, exports) - nao versionar
 outputs/reports/*.pdf
 outputs/reports/*.xlsx
