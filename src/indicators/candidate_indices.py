@@ -1,4 +1,6 @@
-"""Os 20 indices do candidato (secao 11 do briefing de expansao SIET).
+"""Os 23 indices do candidato (secao 11 do briefing de expansao SIET, +3
+adicionados no plano de melhoria do questionario: prontidao_juridico_partidaria,
+capilaridade_institucional, estrutura_campanha).
 
 Mesma familia metodologica de src/potential_index.py (normalizacao 0-100,
 pesos configuraveis em YAML, redistribuicao de peso quando um componente
@@ -8,10 +10,11 @@ dado eleitoral/censitario. Ver ETAPA1_ARQUITETURA.md secao 4: estes
 indices sao rotulados como autoavaliacao em toda interface/relatorio,
 nunca apresentados como medicao objetiva.
 
-17 indices "diretos" (soma ponderada de respostas do questionario, itens
-1-17 da secao 11) + 3 "derivados" (itens 18-20, recombinam os diretos sem
-pergunta nova): potencial de crescimento, competitividade inicial e
-prontidao eleitoral (indice-sintese final do modulo)."""
+20 indices "diretos" (soma ponderada de respostas do questionario, os 17
+originais da secao 11 + 3 novos do plano de melhoria) + 3 "derivados"
+(recombinam os diretos sem pergunta nova): potencial de crescimento,
+competitividade inicial e prontidao eleitoral (indice-sintese final do
+modulo)."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -42,6 +45,9 @@ _INDICES_DIRETOS = [
     "resiliencia",
     "risco_reputacional",
     "rejeicao_potencial",
+    "prontidao_juridico_partidaria",
+    "capilaridade_institucional",
+    "estrutura_campanha",
 ]
 
 # Indices onde nota ALTA = PIOR (mesma convencao do IVE em sessoes

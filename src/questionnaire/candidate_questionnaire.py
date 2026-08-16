@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 
 from ..utils import indicators_config, load_yaml  # noqa: F401  (indicators_config mantido p/ paridade futura)
@@ -100,6 +100,13 @@ class IdentificacaoAnalise:
     # so aparece quando declarado explicitamente.
     possui_padrinho_politico: SimNao | None = None
     nome_padrinho_politico: str | None = None
+    # Nome completo usado em candidaturas ANTERIORES (so relevante quando
+    # ja_disputou_eleicao == SIM) - usado por src/godfather_analysis.py:
+    # analisar_padrinho_politico (funcao generica por nome+UF, reaproveitada
+    # aqui pra buscar a PROPRIA trajetoria real do candidato no TSE, nao so
+    # a do padrinho) - quando encontrado, mostra IDP/IVE/IEC/QEC real dele
+    # em vez de depender so de autoavaliacao pra secao Trajetoria.
+    nome_completo_eleitoral: str | None = None
 
 
 @dataclass
@@ -143,6 +150,131 @@ class BaseEleitoral:
 
 
 @dataclass
+class ApoioInstitucional:
+    """Rede de apoio institucional detalhada - substitui a pergunta
+    generica 'relacionamento com entidades' (que continua existindo em
+    BaseEleitoral) por sinais especificos e mais uteis pro plano de
+    campanha real. Alimenta o Indice de Capilaridade Institucional (conta
+    quantos tipos distintos de apoio existem - ver campos_numericos)."""
+
+    apoio_sindicato: SimNao | None = None
+    sindicatos_declarados: list[str] = field(default_factory=list)
+    # Texto livre, nunca categorico forcado - tema sensivel demais pra
+    # espremer numa escala Nenhuma/Baixa/.../Muito Alta.
+    proximidade_religiosa: str | None = None
+    apoio_movimento_social: SimNao | None = None
+    movimento_social_qual: str | None = None
+    apoio_associacao_empresarial: SimNao | None = None
+    associacao_empresarial_qual: str | None = None
+    midia_local_alinhada: SimNao | None = None
+    midia_local_qual: str | None = None
+
+
+@dataclass
+class EstruturaCampanha:
+    """Estrutura e equipe de campanha - alimenta o Indice de Estrutura de
+    Campanha."""
+
+    coordenador_definido: SimNao | None = None
+    tesoureiro_definido: SimNao | None = None
+    advogado_eleitoral_contratado: SimNao | None = None
+    numero_cabos_eleitorais: int | None = None  # contagem real, nao faixa
+
+
+@dataclass
+class Elegibilidade:
+    """Situacao juridico-partidaria - fatos declarados (nao autoavaliacao
+    categorica), usados pro Indice de Prontidao Juridico-Partidaria e pra
+    narrativa/alertas do relatorio. As DATAS ficam so na narrativa, NUNCA
+    entram em formula: o prazo legal exato de filiacao partidaria e
+    desincompatibilizacao muda por cargo e e definido em lei/resolucao do
+    TSE especifica de cada eleicao - este projeto nao replica esse calculo
+    (risco real de aplicar uma regra desatualizada ou errada), so registra
+    a data declarada pra quem monta a estrategia conferir contra a regra
+    vigente."""
+
+    data_filiacao_partidaria: date | None = None
+    prestacao_contas_em_dia: SimNao | None = None
+    pendencia_justica_eleitoral: SimNao | None = None
+    contexto_pendencia_justica: str | None = None
+    data_domicilio_eleitoral: date | None = None
+
+
+@dataclass
+class Chapa:
+    """Composicao de chapa/coligacao - relevante pra cargos proporcionais
+    (Vereador/Dep. Estadual/Dep. Federal) e pra Vice em cargos majoritarios.
+    Fato declarado, narrativa do relatorio - nao entra em indice numerico."""
+
+    coligacao_formada: SimNao | None = None
+    nome_coligacao: str | None = None
+    candidato_vice: str | None = None
+
+
+@dataclass
+class Cronograma:
+    """Prontidao de material e cronograma de campanha - fato declarado,
+    checklist/narrativa do relatorio, nao entra em indice numerico."""
+
+    numero_urna_definido: SimNao | None = None
+    numero_urna: int | None = None
+    material_grafico_pronto: SimNao | None = None
+    data_convencao_partidaria: date | None = None
+
+
+@dataclass
+class PerfilDemografico:
+    """Perfil demografico autodeclarado - mesmas categorias que o registro
+    real de candidatos do TSE (consulta_cand) usa, pra permitir comparacao
+    direta no futuro.
+
+    LIMITACAO ATUAL, documentada e nao escondida: o pacote de dados
+    nacionais deste projeto (config/data_sources.yaml:pacote_cloud) NAO
+    inclui as colunas demograficas do TSE (foram removidas na reducao pra
+    caber no pacote publicado na nuvem - ver scripts/preparar_dados_nacionais.py).
+    Por isso, por enquanto, estes campos alimentam so a narrativa/relatorio -
+    nao ha comparacao automatica contra candidatos reais parecidos ainda
+    (exigiria reprocessar o pipeline local e republicar o release
+    'dados-v2' com essas colunas, fora do escopo desta rodada)."""
+
+    data_nascimento: date | None = None
+    genero: str | None = None
+    cor_raca_autodeclarada: str | None = None
+    escolaridade: str | None = None
+    ocupacao_atual: str | None = None
+    estado_civil: str | None = None
+
+
+@dataclass
+class RedesSociais:
+    """Handles/links de redes sociais - usados so como evidencia citavel na
+    narrativa do relatorio (nunca scraping automatico - mesmo principio de
+    'nunca chama busca externa automatica' ja documentado em
+    src/godfather_analysis.py). Diferente de `Comunicacao.seguidores_redes`
+    (numero agregado, entra em indice) - aqui sao os links/handles em si."""
+
+    instagram: str | None = None
+    tiktok: str | None = None
+    x_twitter: str | None = None
+    facebook: str | None = None
+    youtube: str | None = None
+
+
+@dataclass
+class PesquisaPropria:
+    """Pesquisa eleitoral propria ja realizada (opcional) - sempre
+    autodeclarada, nunca tratada como dado verificado (rotular sempre como
+    tal na UI/relatorio). Campo deixado pronto pra um cruzamento futuro com
+    o Agregador de Pesquisas Eleitorais (projeto irmao deste) - nao
+    implementado nesta rodada, fora de escopo."""
+
+    ja_realizou_pesquisa: SimNao | None = None
+    instituto_declarado: str | None = None
+    data_pesquisa: date | None = None
+    percentual_declarado: float | None = None
+
+
+@dataclass
 class Comunicacao:
     """Secao 8.4 do briefing."""
 
@@ -179,6 +311,15 @@ class Recursos:
     # (src/candidate_assets.py:carregar_patrimonio_candidato, ja resolvido
     # como Candidatura real em src/rivals/hypothetical_rivals.py).
     patrimonio_pessoal_declarado: float | None = None
+    # Orcamento detalhado (secao 12 do plano de melhoria) - separa a meta
+    # de arrecadacao unica (capacidade_arrecadacao acima) em fontes, pra
+    # narrativa/planejamento financeiro mais preciso. Nao entram em nenhum
+    # indice (evita duplicar peso com capacidade_arrecadacao, que ja mede
+    # a meta agregada).
+    recursos_proprios_estimados: float | None = None
+    doacoes_terceiros_estimadas: float | None = None
+    expectativa_fundo_eleitoral: float | None = None
+    agencia_publicidade_contratada: SimNao | None = None
 
 
 @dataclass
@@ -201,6 +342,22 @@ class Posicionamento:
     # territorio (src/territory_recommendations.py) - nunca inferido a
     # partir do texto livre (evita match fuzzy/impreciso).
     pautas_prioritarias: list[str] = field(default_factory=list)
+    # Visao do PROPRIO candidato sobre o cenario competitivo - SEMPRE numa
+    # camada separada do dado real (nunca substitui, so compara). Na tela
+    # de resultado, cruzado contra src/rivals/hypothetical_rivals.py
+    # (rivais projetados REAIS) pra mostrar convergencia/divergencia entre
+    # percepcao declarada e dado real - o valor esta na diferenca entre
+    # os dois, nunca em tratar a percepcao como fato.
+    adversarios_declarados: list[str] = field(default_factory=list)
+    aliados_declarados: list[str] = field(default_factory=list)
+    # Riscos e vulnerabilidades factuais - aprofunda resistencia_ataques
+    # (que continua existindo, autoavaliacao categorica). Tema sensivel:
+    # sempre autodeclarado pelo proprio candidato, nunca puxado de fonte
+    # externa sem ele declarar primeiro.
+    processo_judicial_conhecido: SimNao | None = None
+    contexto_processo_judicial: str | None = None
+    controversia_publica_conhecida: SimNao | None = None
+    contexto_controversia_publica: str | None = None
 
 
 @dataclass
@@ -215,16 +372,26 @@ class Objetivos:
 
 @dataclass
 class RespostaQuestionario:
-    """Agrega as 7 secoes do questionario (secao 8 do briefing). Uma
-    instancia = uma analise de candidato."""
+    """Agrega todas as secoes do questionario (base da secao 8 do briefing,
+    ampliada com elegibilidade, apoio institucional, estrutura de campanha,
+    chapa, cronograma, perfil demografico, redes sociais e pesquisa
+    propria). Uma instancia = uma analise de candidato."""
 
     identificacao: IdentificacaoAnalise
     trajetoria: Trajetoria = field(default_factory=Trajetoria)
     base_eleitoral: BaseEleitoral = field(default_factory=BaseEleitoral)
+    apoio_institucional: ApoioInstitucional = field(default_factory=ApoioInstitucional)
     comunicacao: Comunicacao = field(default_factory=Comunicacao)
+    redes_sociais: RedesSociais = field(default_factory=RedesSociais)
     recursos: Recursos = field(default_factory=Recursos)
+    estrutura_campanha: EstruturaCampanha = field(default_factory=EstruturaCampanha)
     posicionamento: Posicionamento = field(default_factory=Posicionamento)
     objetivos: Objetivos = field(default_factory=Objetivos)
+    elegibilidade: Elegibilidade = field(default_factory=Elegibilidade)
+    chapa: Chapa = field(default_factory=Chapa)
+    cronograma: Cronograma = field(default_factory=Cronograma)
+    perfil_demografico: PerfilDemografico = field(default_factory=PerfilDemografico)
+    pesquisa_propria: PesquisaPropria = field(default_factory=PesquisaPropria)
     id_analise: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -246,6 +413,15 @@ class RespostaQuestionario:
         )
         out["mandato_anterior"] = valor_normativo(self.trajetoria.mandato_anterior)
         out["partido_definido"] = valor_normativo(self.identificacao.partido_definido)
+        out["numero_cabos_eleitorais"] = valor_normalizado_numerico(
+            "numero_cabos_eleitorais", self.estrutura_campanha.numero_cabos_eleitorais
+        )
+        out["prestacao_contas_em_dia"] = valor_normativo(self.elegibilidade.prestacao_contas_em_dia)
+        out["coordenador_definido"] = valor_normativo(self.estrutura_campanha.coordenador_definido)
+        out["tesoureiro_definido"] = valor_normativo(self.estrutura_campanha.tesoureiro_definido)
+        out["advogado_eleitoral_contratado"] = valor_normativo(
+            self.estrutura_campanha.advogado_eleitoral_contratado
+        )
 
         campos_categoricos_diretos = {
             "conhecimento_espontaneo": self.comunicacao.conhecimento_espontaneo,
@@ -291,6 +467,33 @@ class RespostaQuestionario:
         # separada do questionario.
         disciplina = out.get("disciplina")
         out["indisciplina"] = None if disciplina is None else round(100.0 - disciplina, 1)
+
+        # ausencia_pendencia_justica e o inverso de pendencia_justica_eleitoral
+        # (mesmo padrao de indisciplina acima) - usado no Indice de Prontidao
+        # Juridico-Partidaria: pendencia=SIM deve PIORAR o indice, entao o
+        # campo que entra na formula e a ausencia (100 - valor).
+        pendencia_justica = valor_normativo(self.elegibilidade.pendencia_justica_eleitoral)
+        out["ausencia_pendencia_justica"] = (
+            None if pendencia_justica is None else round(100.0 - pendencia_justica, 1)
+        )
+
+        # capilaridade_institucional_contagem: quantos TIPOS distintos de
+        # apoio institucional foram declarados como SIM, entre os
+        # respondidos (nao e media de nivel, e contagem - diferente do
+        # resto dos campos aqui). None so se NENHUM dos 4 foi respondido -
+        # nunca preenche com estimativa (mesma regra do resto do modulo).
+        flags_institucionais = [
+            self.apoio_institucional.apoio_sindicato,
+            self.apoio_institucional.apoio_movimento_social,
+            self.apoio_institucional.apoio_associacao_empresarial,
+            self.apoio_institucional.midia_local_alinhada,
+        ]
+        respondidas = [f for f in flags_institucionais if f is not None]
+        if respondidas:
+            n_sim = sum(1 for f in respondidas if f == SimNao.SIM)
+            out["capilaridade_institucional_contagem"] = round(100.0 * n_sim / len(respondidas), 1)
+        else:
+            out["capilaridade_institucional_contagem"] = None
 
         return out
 

@@ -121,8 +121,8 @@ _OPCOES_NIVEL = _opcoes_nivel(NivelIntensidade)
 _OPCOES_SIMNAO = _opcoes_simnao(SimNao)
 
 
-def _nivel(label: str, key: str):
-    return _OPCOES_NIVEL[st.selectbox(label, list(_OPCOES_NIVEL.keys()), key=key)]
+def _nivel(label: str, key: str, help: str | None = None):
+    return _OPCOES_NIVEL[st.selectbox(label, list(_OPCOES_NIVEL.keys()), key=key, help=help)]
 
 
 def _simnao(label: str, key: str):

@@ -141,7 +141,8 @@ from src.questionnaire.candidate_questionnaire import (
     SimNao,
     Trajetoria,
 )
-from src.questionnaire.persistence import carregar_resposta_bruta, listar_respostas_salvas
+from src.questionnaire.persistence import carregar_resposta_bruta, listar_respostas_salvas, reconstruir_resposta
+from src.questionnaire.render import renderizar_analise_completa
 
 # Rivais projetados + compatibilidade partidaria (secoes 17/22, dentro do
 # Modulo Candidato) - DIFERENTE do resto do modulo: usa dado real do TSE da
@@ -1025,7 +1026,15 @@ def _pagina_candidatos_analisados() -> None:
     escolhido = st.selectbox("Ver detalhe de um candidato", list(rotulos.keys()), key="ca_escolhido")
     if escolhido:
         bruto = carregar_resposta_bruta(rotulos[escolhido])
-        st.json(bruto, expanded=False)
+        try:
+            resposta, propostas_pauta = reconstruir_resposta(bruto)
+        except Exception as exc:
+            st.error(f"Nao foi possivel reconstruir esta analise (arquivo pode ser de uma versao antiga do schema): {exc}")
+            st.json(bruto, expanded=False)
+            return
+        renderizar_analise_completa(resposta, propostas_pauta)
+        with st.expander("Ver JSON bruto"):
+            st.json(bruto, expanded=False)
 
 
 @st.cache_data(show_spinner=False)

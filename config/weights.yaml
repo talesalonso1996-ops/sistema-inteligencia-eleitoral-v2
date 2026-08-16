@@ -45,6 +45,8 @@ normalizacao_numerica:
     teto_referencia: 100000   # 100 mil seguidores satura em 100 - referencia para candidato municipal/estadual (nao presidenciavel)
   capacidade_arrecadacao:
     teto_referencia: 500000   # R$500 mil satura em 100 - proximo do teto legal de campanha de Vereador/Prefeito em municipios medios
+  numero_cabos_eleitorais:
+    teto_referencia: 50   # 50 cabos eleitorais mobilizaveis satura em 100 - referencia municipal/estadual
 
 indices_candidato:
   # cada indice "direto" lista os campos do questionario (ver
@@ -146,6 +148,30 @@ indices_candidato:
   rejeicao_potencial:
     pesos:
       rejeicao_percebida: 1.0
+
+  # 3 indices novos (plano de melhoria do questionario) - mesma familia
+  # metodologica dos 17 diretos acima (soma ponderada com redistribuicao
+  # de peso quando falta resposta).
+  prontidao_juridico_partidaria:
+    pesos:
+      partido_definido: 0.3
+      prestacao_contas_em_dia: 0.4
+      ausencia_pendencia_justica: 0.3
+
+  capilaridade_institucional:
+    pesos:
+      # campo unico ja pre-computado (contagem de tipos de apoio
+      # institucional declarados - ver campos_numericos() em
+      # candidate_questionnaire.py), mesmo padrao de peso 1.0 usado em
+      # experiencia_administrativa acima.
+      capilaridade_institucional_contagem: 1.0
+
+  estrutura_campanha:
+    pesos:
+      coordenador_definido: 0.3
+      tesoureiro_definido: 0.25
+      advogado_eleitoral_contratado: 0.2
+      numero_cabos_eleitorais: 0.25
 
   # indices DERIVADOS (recombinam os indices diretos acima, nao pedem
   # pergunta nova - ver ETAPA1_ARQUITETURA.md secao 5).

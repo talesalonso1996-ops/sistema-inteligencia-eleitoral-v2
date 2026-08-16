@@ -218,10 +218,28 @@ def test_taxa_preenchimento_completa_alta():
             disponibilidade_viagens=NivelIntensidade.ALTA,
         ),
     )
-    from src.questionnaire.candidate_questionnaire import Posicionamento
+    from src.questionnaire.candidate_questionnaire import (
+        ApoioInstitucional,
+        Elegibilidade,
+        EstruturaCampanha,
+        Posicionamento,
+    )
 
     resposta_completa.posicionamento = Posicionamento(
         resistencia_ataques=NivelIntensidade.ALTA, disciplina=NivelIntensidade.ALTA
     )
     resposta_completa.identificacao.partido_definido = SimNao.SIM
+    resposta_completa.estrutura_campanha = EstruturaCampanha(
+        coordenador_definido=SimNao.SIM,
+        tesoureiro_definido=SimNao.SIM,
+        advogado_eleitoral_contratado=SimNao.NAO,
+        numero_cabos_eleitorais=20,
+    )
+    resposta_completa.elegibilidade = Elegibilidade(
+        prestacao_contas_em_dia=SimNao.SIM, pendencia_justica_eleitoral=SimNao.NAO,
+    )
+    resposta_completa.apoio_institucional = ApoioInstitucional(
+        apoio_sindicato=SimNao.SIM, apoio_movimento_social=SimNao.NAO,
+        apoio_associacao_empresarial=SimNao.SIM, midia_local_alinhada=SimNao.NAO,
+    )
     assert resposta_completa.taxa_preenchimento() > 90.0

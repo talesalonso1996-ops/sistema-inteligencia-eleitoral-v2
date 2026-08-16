@@ -16,9 +16,11 @@ falhar."""
 from __future__ import annotations
 
 import base64
+import dataclasses
 import json
+import typing
 from dataclasses import asdict
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -39,7 +41,11 @@ _DIR_RESPOSTAS = "data/candidatos/respostas"
 def _json_default(obj: Any):
     if isinstance(obj, Enum):
         return obj.value
-    if isinstance(obj, datetime):
+    # datetime e subclasse de date - checar datetime primeiro preserva a
+    # hora quando existir (timestamp), e date-puro (novos campos de
+    # elegibilidade/cronograma/perfil demografico/pesquisa propria) cai no
+    # isoformat() so-data.
+    if isinstance(obj, (datetime, date)):
         return obj.isoformat()
     raise TypeError(f"Tipo nao serializavel em JSON: {type(obj)!r}")
 
@@ -175,7 +181,54 @@ def listar_respostas_salvas() -> list[dict]:
 
 
 def carregar_resposta_bruta(arquivo: Path) -> dict:
-    """Retorna o dict cru salvo (resposta + propostas_pauta) - usado quando
-    a UI precisa mostrar/reabrir uma analise salva, sem reconstruir as
-    dataclasses (a exibicao hoje so precisa dos campos, nao dos metodos)."""
+    """Retorna o dict cru salvo (resposta + propostas_pauta)."""
     return json.loads(arquivo.read_text(encoding="utf-8"))
+
+
+def _tipo_sem_none(tipo: Any) -> Any:
+    args = typing.get_args(tipo)
+    if not args:
+        return tipo
+    nao_none = [a for a in args if a is not type(None)]
+    return nao_none[0] if nao_none else tipo
+
+
+def _reidratar(cls: type, dado: dict) -> Any:
+    """Reconstroi uma dataclass (aninhada, recursivamente) a partir do dict
+    cru gravado em JSON - inverso de `asdict()` + `_json_default`. Generico
+    (usa `typing.get_type_hints` pra decidir como converter cada campo) em
+    vez de repetir a reconstrucao campo a campo pras ~90 chaves do
+    questionario completo - qualquer campo novo adicionado ao schema passa
+    a ser reconstruido automaticamente, sem precisar tocar aqui."""
+    hints = typing.get_type_hints(cls)
+    kwargs = {}
+    for campo in dataclasses.fields(cls):
+        if campo.name not in dado:
+            continue
+        valor = dado[campo.name]
+        if valor is None:
+            kwargs[campo.name] = None
+            continue
+        tipo = _tipo_sem_none(hints[campo.name])
+        if isinstance(tipo, type) and dataclasses.is_dataclass(tipo):
+            kwargs[campo.name] = _reidratar(tipo, valor)
+        elif tipo is date and isinstance(valor, str):
+            kwargs[campo.name] = datetime.fromisoformat(valor).date()
+        elif tipo is datetime and isinstance(valor, str):
+            kwargs[campo.name] = datetime.fromisoformat(valor)
+        elif isinstance(tipo, type) and issubclass(tipo, Enum) and isinstance(valor, str):
+            kwargs[campo.name] = tipo(valor)
+        else:
+            kwargs[campo.name] = valor
+    return cls(**kwargs)
+
+
+def reconstruir_resposta(bruto: dict) -> tuple[RespostaQuestionario, list[PropostaPauta]]:
+    """Reconstroi `RespostaQuestionario` + `list[PropostaPauta]` a partir do
+    dict cru de `carregar_resposta_bruta` - usado pela pagina "Candidatos
+    Analisados" de app.py pra reaproveitar a MESMA renderizacao rica de
+    `src/questionnaire/render.py` num candidato ja salvo, em vez de mostrar
+    `st.json()` cru."""
+    resposta = _reidratar(RespostaQuestionario, bruto["resposta"])
+    propostas = [_reidratar(PropostaPauta, p) for p in bruto.get("propostas_pauta", [])]
+    return resposta, propostas

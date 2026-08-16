@@ -1,8 +1,12 @@
-"""Testes dos 20 indices do candidato (secao 11) - dados ficticios."""
+"""Testes dos 23 indices do candidato (secao 11 + 3 novos do plano de
+melhoria) - dados ficticios."""
 from src.indicators.candidate_indices import _INDICES_DIRETOS, calcular_indices_candidato, weights_config
 from src.questionnaire.candidate_questionnaire import (
+    ApoioInstitucional,
     BaseEleitoral,
     Comunicacao,
+    Elegibilidade,
+    EstruturaCampanha,
     IdentificacaoAnalise,
     NivelIntensidade,
     Posicionamento,
@@ -72,21 +76,33 @@ def _resposta_alta() -> RespostaQuestionario:
         posicionamento=Posicionamento(
             resistencia_ataques=NivelIntensidade.ALTA, disciplina=NivelIntensidade.ALTA
         ),
+        estrutura_campanha=EstruturaCampanha(
+            coordenador_definido=SimNao.SIM, tesoureiro_definido=SimNao.SIM,
+            advogado_eleitoral_contratado=SimNao.SIM, numero_cabos_eleitorais=40,
+        ),
+        elegibilidade=Elegibilidade(
+            prestacao_contas_em_dia=SimNao.SIM, pendencia_justica_eleitoral=SimNao.NAO,
+        ),
+        apoio_institucional=ApoioInstitucional(
+            apoio_sindicato=SimNao.SIM, apoio_movimento_social=SimNao.SIM,
+            apoio_associacao_empresarial=SimNao.SIM, midia_local_alinhada=SimNao.SIM,
+        ),
     )
 
 
-def test_todos_os_20_indices_presentes():
+def test_todos_os_23_indices_presentes():
     resultado = calcular_indices_candidato(_resposta_alta())
     nomes_esperados = {
         "conhecimento_publico", "capilaridade_territorial", "mobilizacao", "estrutura_politica",
         "estrutura_operacional", "capacidade_financeira_legal", "comunicacao", "presenca_digital",
         "autoridade_tematica", "experiencia_politica", "experiencia_administrativa",
         "relacionamento_institucional", "apoio_partidario", "disponibilidade", "resiliencia",
-        "risco_reputacional", "rejeicao_potencial", "potencial_crescimento",
+        "risco_reputacional", "rejeicao_potencial", "prontidao_juridico_partidaria",
+        "capilaridade_institucional", "estrutura_campanha", "potencial_crescimento",
         "competitividade_inicial", "prontidao_eleitoral",
     }
     assert nomes_esperados == set(resultado.indices.keys())
-    assert len(nomes_esperados) == 20
+    assert len(nomes_esperados) == 23
 
 
 def test_valores_dentro_de_0_100():
@@ -103,7 +119,7 @@ def test_candidato_com_respostas_altas_tem_prontidao_alta():
 
 
 def test_resposta_vazia_gera_indices_diretos_zerados_com_cobertura_zero():
-    """Sem nenhuma resposta, os 17 indices DIRETOS ficam em 0 com
+    """Sem nenhuma resposta, os 20 indices DIRETOS ficam em 0 com
     cobertura 0% (nunca preenchidos com estimativa). Os 3 indices
     DERIVADOS (potencial_crescimento, competitividade_inicial,
     prontidao_eleitoral) tem cobertura estrutural propria - eles sempre
